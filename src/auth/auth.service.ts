@@ -88,7 +88,12 @@ export class AuthService {
   }
 
   private generateToken(user: any) {
-    const payload = { email: user.email, sub: user._id, role: user.role };
+    const payload = { 
+      email: user.email, 
+      sub: user._id, 
+      role: user.role,
+      permissions: user.permissions || [],
+    };
     return {
       access_token: this.jwtService.sign(payload),
       user: {
@@ -99,6 +104,10 @@ export class AuthService {
         phoneNumber: user.phoneNumber,
         role: user.role,
         class: user.class,
+        classes: user.classes || (user.class ? [user.class] : []),
+        subject: user.subject,
+        subjects: user.subjects || (user.subject ? [user.subject] : []),
+        permissions: user.permissions || [],
         school: user.school,
       }
     };

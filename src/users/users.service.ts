@@ -20,9 +20,36 @@ export class UsersService {
       throw new ConflictException('User with this email already exists');
     }
 
+    let rawPasswordForEmail: string | undefined = undefined;
+
+    // For teachers, auto-generate a secure temporary password if not provided
+    if (createUserDto.role === UserRole.TEACHER || createUserDto.role === ('teacher' as any)) {
+      if (!createUserDto.password) {
+        // Generate friendly random password e.g. KSch-948271
+        const randNum = Math.floor(100000 + Math.random() * 900000);
+        rawPasswordForEmail = `KSch-${randNum}`;
+        createUserDto.password = rawPasswordForEmail;
+      } else {
+        rawPasswordForEmail = createUserDto.password;
+      }
+    }
+
     if (createUserDto.password) {
       const salt = await bcrypt.genSalt();
       createUserDto.password = await bcrypt.hash(createUserDto.password, salt);
+    }
+
+    // Standardize classes and subjects arrays
+    if (createUserDto.class && (!createUserDto.classes || createUserDto.classes.length === 0)) {
+      createUserDto.classes = [createUserDto.class];
+    } else if (createUserDto.classes && createUserDto.classes.length > 0 && !createUserDto.class) {
+      createUserDto.class = createUserDto.classes[0];
+    }
+
+    if (createUserDto.subject && (!createUserDto.subjects || createUserDto.subjects.length === 0)) {
+      createUserDto.subjects = [createUserDto.subject];
+    } else if (createUserDto.subjects && createUserDto.subjects.length > 0 && !createUserDto.subject) {
+      createUserDto.subject = createUserDto.subjects[0];
     }
 
     const createdUser = new this.userModel(createUserDto);
@@ -32,8 +59,12 @@ export class UsersService {
     try {
       if (savedUser.role === UserRole.TEACHER || savedUser.role === ('teacher' as any)) {
         await this.mailService.sendTeacherInviteEmail(savedUser, {
+          password: rawPasswordForEmail,
           assignedClass: savedUser.class,
+          classes: savedUser.classes,
           subject: savedUser.subject,
+          subjects: savedUser.subjects,
+          permissions: savedUser.permissions,
         });
       } else {
         await this.mailService.sendWelcomeEmail(savedUser);

@@ -43,6 +43,18 @@ export class CreateUserDto {
   @IsOptional()
   subject?: string;
 
+  @ApiProperty({ example: ['JSS 1', 'JSS 2'], type: [String], required: false })
+  @IsOptional()
+  classes?: string[];
+
+  @ApiProperty({ example: ['Mathematics', 'English Language'], type: [String], required: false })
+  @IsOptional()
+  subjects?: string[];
+
+  @ApiProperty({ example: ['lessons', 'exercises', 'quizzes'], type: [String], required: false })
+  @IsOptional()
+  permissions?: string[];
+
   @ApiProperty({ example: UserRole.STUDENT, enum: UserRole, required: false })
   @IsEnum(UserRole)
   @IsOptional()

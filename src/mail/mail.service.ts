@@ -528,59 +528,143 @@ export class MailService {
 
   async sendTeacherInviteEmail(
     teacher: any,
-    details?: { assignedClass?: string; subject?: string },
+    details?: { 
+      password?: string;
+      assignedClass?: string; 
+      classes?: string[];
+      subject?: string;
+      subjects?: string[];
+      permissions?: string[];
+    },
   ) {
     try {
       const firstName = teacher.firstName || 'Teacher';
       const fullName = `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim() || 'Educator';
-      const assignedClass = details?.assignedClass || teacher.class || 'Assigned Class';
-      const subject = details?.subject || teacher.subject || 'Assigned Subject';
+      
+      const classList = details?.classes && details.classes.length > 0 
+        ? details.classes 
+        : (teacher.classes && teacher.classes.length > 0 ? teacher.classes : [details?.assignedClass || teacher.class || 'Assigned Class']);
+      
+      const subjectList = details?.subjects && details.subjects.length > 0
+        ? details.subjects
+        : (teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects : [details?.subject || teacher.subject || 'Assigned Subject']);
+
+      const permissionsList = details?.permissions && details.permissions.length > 0
+        ? details.permissions
+        : (teacher.permissions && teacher.permissions.length > 0 ? teacher.permissions : ['lessons', 'exercises', 'quizzes', 'students']);
+
+      const rawPassword = details?.password;
+      const portalUrl = process.env.ADMIN_URL || 'http://localhost:3000/login';
+
+      const classesBadgeHtml = classList
+        .map(
+          (c: string) => `<span style="display: inline-block; background-color: #E0F2FE; color: #0369A1; font-weight: 700; font-size: 12px; padding: 4px 10px; border-radius: 6px; margin: 2px 4px 2px 0;">${c}</span>`
+        )
+        .join('');
+
+      const subjectsBadgeHtml = subjectList
+        .map(
+          (s: string) => `<span style="display: inline-block; background-color: #ECFDF5; color: #065F46; font-weight: 700; font-size: 12px; padding: 4px 10px; border-radius: 6px; margin: 2px 4px 2px 0;">${s}</span>`
+        )
+        .join('');
+
+      const permissionsBadgeHtml = permissionsList
+        .map(
+          (p: string) => `<span style="display: inline-block; background-color: #F3F4F6; color: #374151; font-weight: 600; font-size: 11px; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; margin: 2px 4px 2px 0;">${p}</span>`
+        )
+        .join('');
 
       const content = `
         <p style="margin: 0 0 16px 0;">Hello <strong>${fullName}</strong>,</p>
         <p style="margin: 0 0 20px 0;">
-          You have been formally invited to join the <strong>KSCHOOLMATE Teaching Faculty</strong>! Your teacher profile has been registered on the school curriculum portal.
+          You have been formally invited to join the <strong>KSCHOOLMATE Teaching Faculty</strong>! An instructor account has been created for you with direct access to manage curriculum, assignments, and student engagement.
         </p>
 
-        <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 14px; padding: 20px; margin: 24px 0;">
-          <h3 style="margin: 0 0 12px 0; font-size: 15px; font-weight: 700; color: #127A71;">
-            Your Teaching Assignment Details 📚
+        <!-- Credentials Card -->
+        <div style="background-color: #F8FAFC; border: 1.5px solid #CBD5E1; border-radius: 16px; padding: 22px; margin: 24px 0;">
+          <h3 style="margin: 0 0 14px 0; font-size: 15px; font-weight: 800; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px;">
+            🔐 Your Account Login Credentials
+          </h3>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size: 14px; color: #334155;">
+            <tr>
+              <td style="padding: 6px 0; font-weight: 600; color: #64748B; width: 140px;">Portal Login URL:</td>
+              <td style="padding: 6px 0; font-weight: 700; color: #127A71;">
+                <a href="${portalUrl}" style="color: #127A71; text-decoration: underline;">${portalUrl}</a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; font-weight: 600; color: #64748B;">Username / Email:</td>
+              <td style="padding: 6px 0; font-family: monospace; font-size: 14px; font-weight: 700; color: #0F172A;">${teacher.email}</td>
+            </tr>
+            ${
+              rawPassword
+                ? `
+            <tr>
+              <td style="padding: 6px 0; font-weight: 600; color: #64748B;">Generated Password:</td>
+              <td style="padding: 6px 0;">
+                <span style="display: inline-block; background-color: #ECFDF5; border: 1px dashed #0D6D62; color: #0D6D62; font-family: monospace; font-size: 16px; font-weight: 800; padding: 6px 14px; border-radius: 8px; letter-spacing: 1px;">
+                  ${rawPassword}
+                </span>
+              </td>
+            </tr>
+            `
+                : ''
+            }
+          </table>
+          <p style="margin: 12px 0 0 0; font-size: 12px; color: #64748B;">
+            ℹ️ Please log in and change your password in your settings if desired.
+          </p>
+        </div>
+
+        <!-- Assignment Details -->
+        <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 16px; padding: 22px; margin: 24px 0;">
+          <h3 style="margin: 0 0 14px 0; font-size: 15px; font-weight: 700; color: #127A71;">
+            📚 Your Teaching Assignment & Permissions
           </h3>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size: 14px; color: #374151;">
             <tr>
-              <td style="padding: 6px 0; font-weight: 600; color: #6B7280; width: 140px;">Registered Name:</td>
-              <td style="padding: 6px 0; font-weight: 700; color: #111827;">${fullName}</td>
+              <td style="padding: 8px 0; font-weight: 600; color: #6B7280; width: 140px; vertical-align: top;">Assigned Classes:</td>
+              <td style="padding: 8px 0;">
+                ${classesBadgeHtml}
+              </td>
             </tr>
             <tr>
-              <td style="padding: 6px 0; font-weight: 600; color: #6B7280;">Login Email:</td>
-              <td style="padding: 6px 0; font-weight: 700; color: #111827;">${teacher.email}</td>
+              <td style="padding: 8px 0; font-weight: 600; color: #6B7280; vertical-align: top;">Assigned Subjects:</td>
+              <td style="padding: 8px 0;">
+                ${subjectsBadgeHtml}
+              </td>
             </tr>
             <tr>
-              <td style="padding: 6px 0; font-weight: 600; color: #6B7280;">Assigned Class:</td>
-              <td style="padding: 6px 0; font-weight: 700; color: #0E6659;">${assignedClass}</td>
-            </tr>
-            <tr>
-              <td style="padding: 6px 0; font-weight: 600; color: #6B7280;">Primary Subject:</td>
-              <td style="padding: 6px 0; font-weight: 700; color: #0E6659;">${subject}</td>
+              <td style="padding: 8px 0; font-weight: 600; color: #6B7280; vertical-align: top;">Page Permissions:</td>
+              <td style="padding: 8px 0;">
+                ${permissionsBadgeHtml}
+              </td>
             </tr>
           </table>
         </div>
 
-        <p style="margin: 0 0 16px 0;">
-          As an instructor on KSCHOOLMATE, you will have tools to supervise lesson material, review quiz performance, monitor student comprehension, and guide your classroom to academic excellence.
-        </p>
+        <!-- Action Button -->
+        <table role="presentation" cellspacing="0" cellpadding="0" style="margin: 28px 0 16px 0;">
+          <tr>
+            <td align="center" style="border-radius: 28px; background-color: #127A71;">
+              <a href="${portalUrl}" target="_blank" style="font-size: 15px; font-weight: 700; color: #FFFFFF; text-decoration: none; padding: 14px 34px; display: inline-block;">
+                Sign In to Teacher Portal →
+              </a>
+            </td>
+          </tr>
+        </table>
 
         <p style="margin: 24px 0 0 0; font-size: 13px; color: #6B7280;">
-          If you have any questions or require an invitation onboarding token reset, reach out directly to the school administrative office or reply to this email.
+          If you have any questions or require assistance accessing your classes, please reach out to the school administration office.
         </p>
       `;
 
       await this.mailerService.sendMail({
         to: teacher.email,
-        subject: `Welcome to KSCHOOLMATE Faculty: You're Invited as a Teacher! 🎓`,
+        subject: `Welcome to KSCHOOLMATE Faculty: Your Account Credentials 🎓`,
         html: this.renderBaseTemplate({
           title: `Faculty Invitation: Welcome ${firstName} 🎓`,
-          subtitle: `You have been appointed to teach ${subject} for ${assignedClass}.`,
+          subtitle: `Your teacher account and login credentials are ready.`,
           content,
         }),
       });

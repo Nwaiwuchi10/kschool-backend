@@ -35,6 +35,15 @@ export class User {
   @Prop()
   school: string;
 
+  @Prop({ type: [String], default: [] })
+  classes: string[];
+
+  @Prop({ type: [String], default: [] })
+  subjects: string[];
+
+  @Prop({ type: [String], default: [] })
+  permissions: string[];
+
   @Prop({ type: String, enum: UserRole, default: UserRole.STUDENT })
   role: UserRole;
 
