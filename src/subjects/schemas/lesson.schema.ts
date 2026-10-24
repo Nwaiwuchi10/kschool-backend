@@ -21,6 +21,14 @@ export class Lesson {
   @Prop({ default: '' })
   content: string; // Markdown or HTML string for written content
 
+  // Optional Lesson Learning Objectives (e.g. "Define a verb", "Identify verbs in sentences")
+  @Prop({ type: [String], default: [] })
+  objectives?: string[];
+
+  // Optional Lesson Outlines / Agenda / Breakdown
+  @Prop({ type: [String], default: [] })
+  outlines?: string[];
+
   // Multiple Cloudinary images for lesson illustrations / visual aids
   @Prop({ type: [String], default: [] })
   images: string[];
