@@ -1,10 +1,15 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { ExpressAdapter } from '@nestjs/platform-express';
+import express, { Express } from 'express';
 import { AppModule } from './app.module';
 
+const server: Express = express();
+let isReady = false;
+
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   // Swagger Configuration
@@ -19,6 +24,26 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   app.enableCors();
-  await app.listen(process.env.PORT ?? 3500);
+  await app.init();
+  isReady = true;
 }
-bootstrap();
+
+const bootstrapPromise = bootstrap();
+
+// Local execution if run directly outside Vercel
+if (!process.env.VERCEL) {
+  bootstrapPromise.then(() => {
+    const port = process.env.PORT ?? 3500;
+    server.listen(port, () => {
+      console.log(`Server listening on http://localhost:${port}`);
+    });
+  });
+}
+
+// Serverless handler for Vercel
+export default async function handler(req: any, res: any) {
+  if (!isReady) {
+    await bootstrapPromise;
+  }
+  server(req, res);
+}
