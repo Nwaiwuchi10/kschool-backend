@@ -123,14 +123,56 @@ export class SubjectsService {
   }
 
   async createSubject(data: any): Promise<Subject> {
-    const subject = new this.subjectModel(data);
+    const classes = Array.isArray(data.classes)
+      ? data.classes.filter(Boolean)
+      : data.classLevel
+      ? [data.classLevel]
+      : [];
+    const primaryClass = classes[0] || data.classLevel || '';
+
+    const subject = new this.subjectModel({
+      ...data,
+      classes,
+      classLevel: primaryClass,
+    });
     return subject.save();
+  }
+
+  async updateSubject(id: string, data: any): Promise<Subject> {
+    const updatePayload: any = { ...data };
+    if (Array.isArray(data.classes)) {
+      updatePayload.classes = data.classes.filter(Boolean);
+      if (!updatePayload.classLevel && updatePayload.classes.length > 0) {
+        updatePayload.classLevel = updatePayload.classes[0];
+      }
+    }
+    const updated = await this.subjectModel
+      .findByIdAndUpdate(id, updatePayload, { new: true })
+      .populate({
+        path: 'topics',
+        populate: {
+          path: 'lessons',
+        },
+      })
+      .exec();
+    if (!updated) throw new NotFoundException('Subject not found');
+    return updated;
+  }
+
+  async deleteSubject(id: string): Promise<void> {
+    const deleted = await this.subjectModel.findByIdAndDelete(id).exec();
+    if (!deleted) throw new NotFoundException('Subject not found');
   }
 
   async findAllSubjects(classLevel?: string): Promise<Subject[]> {
     const filter: any = {};
     if (classLevel && classLevel.trim()) {
-      filter.classLevel = { $regex: new RegExp(`^${classLevel.trim()}$`, 'i') };
+      const trimmed = classLevel.trim();
+      const regex = new RegExp(`^${trimmed}$`, 'i');
+      filter.$or = [
+        { classes: { $in: [trimmed, regex] } },
+        { classLevel: regex },
+      ];
     }
     return this.subjectModel.find(filter).populate({
       path: 'topics',

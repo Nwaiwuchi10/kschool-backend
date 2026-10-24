@@ -31,6 +31,22 @@ export class SubjectsController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update a subject and its linked classes' })
+  updateSubject(@Param('id') id: string, @Body() body: any) {
+    return this.subjectsService.updateSubject(id, body);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a subject' })
+  deleteSubject(@Param('id') id: string) {
+    return this.subjectsService.deleteSubject(id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Post(':id/topics')
   @ApiOperation({ summary: 'Create a new topic under a subject' })
   createTopic(@Param('id') id: string, @Body() body: any) {
