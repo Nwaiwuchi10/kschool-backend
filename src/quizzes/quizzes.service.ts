@@ -5,6 +5,7 @@ import { Quiz, QuizDocument } from './schemas/quiz.schema';
 import { QuizResult, QuizResultDocument } from './schemas/quiz-result.schema';
 import { Exercise, ExerciseDocument } from './schemas/exercise.schema';
 import { Topic, TopicDocument } from '../subjects/schemas/topic.schema';
+import { Lesson, LessonDocument } from '../subjects/schemas/lesson.schema';
 
 @Injectable()
 export class QuizzesService {
@@ -13,21 +14,48 @@ export class QuizzesService {
     @InjectModel(QuizResult.name) private resultModel: Model<QuizResultDocument>,
     @InjectModel(Exercise.name) private exerciseModel: Model<ExerciseDocument>,
     @InjectModel(Topic.name) private topicModel: Model<TopicDocument>,
+    @InjectModel(Lesson.name) private lessonModel: Model<LessonDocument>,
   ) {}
 
-  async createQuiz(topicId: string, data: any): Promise<Quiz> {
-    const quiz = new this.quizModel({ ...data, topic: topicId });
+  async createQuizGeneric(data: any): Promise<Quiz> {
+    const quiz = new this.quizModel(data);
     const saved = await quiz.save();
-    try {
-      if (Types.ObjectId.isValid(topicId)) {
-        await this.topicModel.findByIdAndUpdate(topicId, {
+
+    // If attached to a lesson, link it to the lesson
+    if (data.lesson && Types.ObjectId.isValid(data.lesson)) {
+      try {
+        await this.lessonModel.findByIdAndUpdate(data.lesson, {
+          quiz: saved._id,
+        });
+      } catch (err) {
+        // Non-fatal
+      }
+    }
+
+    // If attached to a topic, link to topic
+    if (data.topic && Types.ObjectId.isValid(data.topic)) {
+      try {
+        await this.topicModel.findByIdAndUpdate(data.topic, {
           $addToSet: { quizzes: saved._id },
         });
+      } catch (err) {
+        // Non-fatal
       }
-    } catch (err) {
-      // Non-fatal if topic link fails
     }
+
     return saved;
+  }
+
+  async createQuiz(topicId: string, data: any): Promise<Quiz> {
+    return this.createQuizGeneric({ ...data, topic: topicId });
+  }
+
+  async findQuizzesByLesson(lessonId: string): Promise<Quiz[]> {
+    const objectId = Types.ObjectId.isValid(lessonId) ? new Types.ObjectId(lessonId) : null;
+    const filter = objectId
+      ? { $or: [{ lesson: lessonId as any }, { lesson: objectId as any }] }
+      : { lesson: lessonId as any };
+    return this.quizModel.find(filter).exec();
   }
 
   async findAllQuizzes(): Promise<Quiz[]> {

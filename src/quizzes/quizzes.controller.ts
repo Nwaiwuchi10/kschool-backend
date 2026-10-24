@@ -10,6 +10,12 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 export class QuizzesController {
   constructor(private readonly quizzesService: QuizzesService) {}
 
+  @Post('create')
+  @ApiOperation({ summary: 'Create a quiz attached to a lesson or topic' })
+  createStandaloneOrLessonQuiz(@Body() body: any) {
+    return this.quizzesService.createQuizGeneric(body);
+  }
+
   @Post('topic/:topicId')
   @ApiOperation({ summary: 'Create a quiz under a topic' })
   createQuiz(@Param('topicId') topicId: string, @Body() body: any) {
@@ -20,6 +26,12 @@ export class QuizzesController {
   @ApiOperation({ summary: 'Get all quizzes under a topic' })
   findQuizzesByTopic(@Param('topicId') topicId: string) {
     return this.quizzesService.findQuizzesByTopic(topicId);
+  }
+
+  @Get('lesson/:lessonId')
+  @ApiOperation({ summary: 'Get quizzes attached to a specific lesson' })
+  findQuizzesByLesson(@Param('lessonId') lessonId: string) {
+    return this.quizzesService.findQuizzesByLesson(lessonId);
   }
 
   @Get()

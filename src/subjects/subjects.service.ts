@@ -203,6 +203,7 @@ export class SubjectsService {
     }
     return this.lessonModel.find(filter)
       .populate('subjects')
+      .populate('quiz')
       .populate({
         path: 'topic',
         populate: { path: 'subject' },
@@ -214,6 +215,7 @@ export class SubjectsService {
   async findLessonById(id: string): Promise<Lesson> {
     const lesson = await this.lessonModel.findById(id)
       .populate('subjects')
+      .populate('quiz')
       .populate({
         path: 'topic',
         populate: { path: 'subject' },
@@ -233,6 +235,7 @@ export class SubjectsService {
     }
     const lesson = await this.lessonModel.findByIdAndUpdate(id, updateData, { new: true })
       .populate('subjects')
+      .populate('quiz')
       .populate({
         path: 'topic',
         populate: { path: 'subject' },

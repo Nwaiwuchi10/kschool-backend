@@ -6,14 +6,20 @@ import toStream = require('buffer-to-stream');
 export class CloudinaryService {
   constructor(@Optional() @Inject('CLOUDINARY') private readonly cloudinaryConfig?: any) {}
 
-  async uploadFile(file: Express.Multer.File): Promise<UploadApiResponse | UploadApiErrorResponse> {
+  async uploadFile(
+    file: Express.Multer.File,
+    folder: string = 'kschoolmate',
+  ): Promise<UploadApiResponse | UploadApiErrorResponse> {
     if (!file) {
       throw new BadRequestException('No file provided');
     }
 
     return new Promise((resolve, reject) => {
       const upload = cloudinary.uploader.upload_stream(
-        { folder: 'kschoolmate' },
+        {
+          folder,
+          resource_type: 'auto', // Automatically detects images, audio, video, raw files
+        },
         (error, result) => {
           if (error) return reject(error);
           resolve(result as UploadApiResponse);

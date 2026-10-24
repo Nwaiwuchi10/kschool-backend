@@ -21,8 +21,23 @@ export class Lesson {
   @Prop({ default: '' })
   content: string; // Markdown or HTML string for written content
 
+  // Multiple Cloudinary images for lesson illustrations / visual aids
+  @Prop({ type: [String], default: [] })
+  images: string[];
+
   @Prop()
   videoUrl?: string;
+
+  // Recorded Voice Note per lesson (Cloudinary audio recording, max 10MB)
+  @Prop()
+  voiceNoteUrl?: string;
+
+  @Prop({ default: 0 })
+  voiceNoteDuration?: number; // duration in seconds
+
+  // Attached Quiz / Exercise for this lesson
+  @Prop({ type: Types.ObjectId, ref: 'Quiz', required: false })
+  quiz?: Types.ObjectId;
 
   // Text-to-Speech & Audio Metadata
   @Prop()

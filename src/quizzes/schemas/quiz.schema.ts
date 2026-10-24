@@ -22,8 +22,12 @@ export class Quiz {
   @Prop({ required: true })
   title: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'Topic', required: true })
-  topic: Topic;
+  @Prop({ type: Types.ObjectId, ref: 'Topic', required: false })
+  topic?: Topic;
+
+  // Attached or related lesson
+  @Prop({ type: Types.ObjectId, ref: 'Lesson', required: false })
+  lesson?: Types.ObjectId;
 
   @Prop({ type: [QuestionSchema], default: [] })
   questions: Question[];

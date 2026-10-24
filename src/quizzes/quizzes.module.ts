@@ -6,6 +6,7 @@ import { Quiz, QuizSchema } from './schemas/quiz.schema';
 import { QuizResult, QuizResultSchema } from './schemas/quiz-result.schema';
 import { Exercise, ExerciseSchema } from './schemas/exercise.schema';
 import { Topic, TopicSchema } from '../subjects/schemas/topic.schema';
+import { Lesson, LessonSchema } from '../subjects/schemas/lesson.schema';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { Topic, TopicSchema } from '../subjects/schemas/topic.schema';
       { name: QuizResult.name, schema: QuizResultSchema },
       { name: Exercise.name, schema: ExerciseSchema },
       { name: Topic.name, schema: TopicSchema },
+      { name: Lesson.name, schema: LessonSchema },
     ]),
   ],
   controllers: [QuizzesController],
