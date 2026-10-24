@@ -15,8 +15,8 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody } from '@nes
 import { CloudinaryService } from './cloudinary.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-// Max file sizes: 10MB for general files, images, voice notes
-const MAX_UPLOAD_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+// Max file size: 100MB for media/audio files, 10MB for free tier images
+const MAX_UPLOAD_FILE_SIZE = 100 * 1024 * 1024; // 100MB max limit
 
 @ApiTags('Uploads')
 @ApiBearerAuth()
