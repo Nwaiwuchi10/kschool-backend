@@ -89,10 +89,23 @@ export class SubjectsController {
     return this.subjectsService.deleteTopic(topicId);
   }
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post('lessons')
+  @ApiOperation({ summary: 'Create a standalone lesson or link directly to subject/classes' })
+  createStandaloneLesson(@Body() body: any) {
+    return this.subjectsService.createStandaloneLesson(body);
+  }
+
   @Get('lessons/all')
-  @ApiOperation({ summary: 'Get all curriculum lessons (Admin)' })
-  findAllLessons() {
-    return this.subjectsService.findAllLessons();
+  @ApiOperation({ summary: 'Get all curriculum lessons with optional filters (Admin)' })
+  @ApiQuery({ name: 'classLevel', required: false, type: String })
+  @ApiQuery({ name: 'subjectId', required: false, type: String })
+  findAllLessons(
+    @Query('classLevel') classLevel?: string,
+    @Query('subjectId') subjectId?: string,
+  ) {
+    return this.subjectsService.findAllLessons({ classLevel, subjectId });
   }
 
   @Get('lessons/:lessonId')

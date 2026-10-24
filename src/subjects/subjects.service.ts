@@ -219,12 +219,66 @@ export class SubjectsService {
 
   async createLesson(topicId: string, data: any): Promise<Lesson> {
     const topic = await this.findTopicById(topicId);
-    const lesson = new this.lessonModel({ ...data, topic: topicId });
+    const subjectId = (topic.subject as any)?._id || topic.subject;
+    const subjects = data.subjects && Array.isArray(data.subjects) && data.subjects.length > 0
+      ? data.subjects
+      : subjectId
+      ? [subjectId]
+      : [];
+    const lesson = new this.lessonModel({
+      ...data,
+      topic: topicId,
+      subjects,
+      classes: data.classes || [],
+    });
     const savedLesson = await lesson.save();
 
     // Auto-link lesson to topic
     topic.lessons.push(savedLesson._id as any);
     await (topic as any).save();
+
+    return savedLesson;
+  }
+
+  async createStandaloneLesson(data: any): Promise<Lesson> {
+    let topicId = data.topicId || data.topic;
+    // If a topic wasn't explicitly supplied, check if subjectId was supplied
+    if (!topicId && data.subjectId) {
+      const subject = await this.subjectModel.findById(data.subjectId).populate('topics').exec();
+      if (subject && subject.topics && subject.topics.length > 0) {
+        topicId = (subject.topics[0] as any)._id;
+      } else if (subject) {
+        // Automatically create a default general topic under the subject
+        const topic = new this.topicModel({
+          title: 'General Curriculum Lessons',
+          subject: subject._id,
+        });
+        const savedTopic = await topic.save();
+        subject.topics.push(savedTopic._id as any);
+        await (subject as any).save();
+        topicId = savedTopic._id;
+      }
+    }
+
+    const subjects = data.subjects && Array.isArray(data.subjects)
+      ? data.subjects
+      : data.subjectId
+      ? [data.subjectId]
+      : [];
+
+    const lesson = new this.lessonModel({
+      ...data,
+      topic: topicId || undefined,
+      subjects,
+      classes: data.classes || [],
+    });
+    const savedLesson = await lesson.save();
+
+    if (topicId) {
+      await this.topicModel.findByIdAndUpdate(topicId, {
+        $addToSet: { lessons: savedLesson._id },
+      });
+    }
 
     return savedLesson;
   }
@@ -240,24 +294,53 @@ export class SubjectsService {
     if (!topic) throw new NotFoundException('Topic not found');
   }
 
-  async findAllLessons(): Promise<Lesson[]> {
-    return this.lessonModel.find().populate({
-      path: 'topic',
-      populate: { path: 'subject' },
-    }).sort({ createdAt: -1 }).exec();
+  async findAllLessons(query?: { classLevel?: string; subjectId?: string }): Promise<Lesson[]> {
+    const filter: any = {};
+    if (query?.classLevel && query.classLevel.trim()) {
+      const trimmed = query.classLevel.trim();
+      const regex = new RegExp(`^${trimmed}$`, 'i');
+      filter.classes = { $in: [trimmed, regex] };
+    }
+    if (query?.subjectId && query.subjectId.trim()) {
+      filter.subjects = query.subjectId.trim();
+    }
+    return this.lessonModel.find(filter)
+      .populate('subjects')
+      .populate({
+        path: 'topic',
+        populate: { path: 'subject' },
+      })
+      .sort({ createdAt: -1 })
+      .exec();
   }
 
   async findLessonById(id: string): Promise<Lesson> {
-    const lesson = await this.lessonModel.findById(id).populate({
-      path: 'topic',
-      populate: { path: 'subject' },
-    }).exec();
+    const lesson = await this.lessonModel.findById(id)
+      .populate('subjects')
+      .populate({
+        path: 'topic',
+        populate: { path: 'subject' },
+      })
+      .exec();
     if (!lesson) throw new NotFoundException('Lesson not found');
     return lesson;
   }
 
   async updateLesson(id: string, data: any): Promise<Lesson> {
-    const lesson = await this.lessonModel.findByIdAndUpdate(id, data, { new: true }).exec();
+    const updateData: any = { ...data };
+    if (Array.isArray(data.classes)) {
+      updateData.classes = data.classes.filter(Boolean);
+    }
+    if (Array.isArray(data.subjects)) {
+      updateData.subjects = data.subjects.filter(Boolean);
+    }
+    const lesson = await this.lessonModel.findByIdAndUpdate(id, updateData, { new: true })
+      .populate('subjects')
+      .populate({
+        path: 'topic',
+        populate: { path: 'subject' },
+      })
+      .exec();
     if (!lesson) throw new NotFoundException('Lesson not found');
     return lesson;
   }

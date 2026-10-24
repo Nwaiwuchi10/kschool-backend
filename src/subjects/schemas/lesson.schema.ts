@@ -6,13 +6,19 @@ export type LessonDocument = Lesson & Document;
 
 @Schema({ timestamps: true })
 export class Lesson {
-  @Prop({ required: true })
+  @Prop({ required: true, trim: true })
   title: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'Topic', required: true })
-  topic: Topic;
+  @Prop({ type: Types.ObjectId, ref: 'Topic', required: false })
+  topic?: Topic;
 
-  @Prop()
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Subject' }], default: [] })
+  subjects: Types.ObjectId[]; // Linked subjects (e.g. English Language)
+
+  @Prop({ type: [String], default: [] })
+  classes: string[]; // Linked classes (e.g. ["JSS 1", "JSS 2", "Primary 5"])
+
+  @Prop({ default: '' })
   content: string; // Markdown or HTML string for written content
 
   @Prop()
