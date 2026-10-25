@@ -75,6 +75,14 @@ export class SubscriptionsController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  @Get('my-history')
+  @ApiOperation({ summary: 'Get current user subscription and payment history' })
+  getMyHistory(@Request() req: any) {
+    return this.subscriptionsService.getUserSubscriptionHistory(req.user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Get('check-access')
   @ApiOperation({ summary: 'Check if student can access topic / lesson (free trial or active subscription)' })
   checkAccess(

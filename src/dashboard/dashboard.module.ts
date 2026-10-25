@@ -8,6 +8,7 @@ import { SchoolClass, SchoolClassSchema } from '../classes/schemas/class.schema'
 import { Subject, SubjectSchema } from '../subjects/schemas/subject.schema';
 import { Lesson, LessonSchema } from '../subjects/schemas/lesson.schema';
 import { Quiz, QuizSchema } from '../quizzes/schemas/quiz.schema';
+import { QuizResult, QuizResultSchema } from '../quizzes/schemas/quiz-result.schema';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { Quiz, QuizSchema } from '../quizzes/schemas/quiz.schema';
       { name: Subject.name, schema: SubjectSchema },
       { name: Lesson.name, schema: LessonSchema },
       { name: Quiz.name, schema: QuizSchema },
+      { name: QuizResult.name, schema: QuizResultSchema },
     ]),
   ],
   controllers: [DashboardController],

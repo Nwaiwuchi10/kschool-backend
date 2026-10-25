@@ -4,6 +4,9 @@ import { Model } from 'mongoose';
 import { SubscriptionPackage, SubscriptionPackageDocument } from './schemas/subscription-package.schema';
 import { UserSubscription, UserSubscriptionDocument } from './schemas/user-subscription.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import { Topic, TopicDocument } from '../subjects/schemas/topic.schema';
+import { Lesson, LessonDocument } from '../subjects/schemas/lesson.schema';
+import { Subject, SubjectDocument } from '../subjects/schemas/subject.schema';
 import { MailService } from '../mail/mail.service';
 
 @Injectable()
@@ -17,6 +20,12 @@ export class SubscriptionsService {
     private userSubscriptionModel: Model<UserSubscriptionDocument>,
     @InjectModel(User.name)
     private userModel: Model<UserDocument>,
+    @InjectModel(Topic.name)
+    private topicModel: Model<TopicDocument>,
+    @InjectModel(Lesson.name)
+    private lessonModel: Model<LessonDocument>,
+    @InjectModel(Subject.name)
+    private subjectModel: Model<SubjectDocument>,
     private mailService: MailService,
   ) {}
 
@@ -182,10 +191,19 @@ export class SubscriptionsService {
     return null;
   }
 
+  async getUserSubscriptionHistory(userId: string): Promise<UserSubscription[]> {
+    return this.userSubscriptionModel
+      .find({ user: userId as any })
+      .sort({ createdAt: -1 })
+      .populate('package')
+      .exec();
+  }
+
   /**
    * Enforce lesson & quiz access rules:
-   * First topic is 100% free (free trial).
-   * For subsequent topics, an active or grace subscription is strictly required.
+   * A new user is entitled to one complimentary lesson topic per subject (e.g. English Topic 1, Math Topic 1).
+   * Within that first topic, the first lesson and attached practice exercises are unlocked.
+   * On any attempt to access a second topic or subsequent lessons of any subject, an active or grace subscription is required.
    */
   async checkLessonAccess(
     userId: string,
@@ -222,39 +240,76 @@ export class SubscriptionsService {
       };
     }
 
-    const attendedTopics = user.attendedTopics || [];
-
-    // If user hasn't started any topic yet, this is their first topic -> FREE
-    if (attendedTopics.length === 0) {
+    if (!topicId) {
+      // General topic access inquiry without specific topic ID
       return {
         canAccess: true,
         hasSubscription: false,
         isGracePeriod: false,
         isFreeTrial: true,
-        message: 'Complimentary access for your first topic lessons and quiz.',
+        message: 'Complimentary access available for your first topic in each subject.',
       };
     }
 
-    // If this lesson belongs to the first attended topic -> still FREE
-    if (topicId && (attendedTopics[0] === topicId || attendedTopics.includes(topicId))) {
+    // Find the requested topic and its parent subject
+    const topic = await this.topicModel.findById(topicId).populate('lessons').exec();
+    if (!topic) {
       return {
-        canAccess: true,
+        canAccess: false,
         hasSubscription: false,
         isGracePeriod: false,
-        isFreeTrial: true,
-        message: 'Complimentary access for your first topic.',
+        isFreeTrial: false,
+        reason: 'topic_not_found',
       };
     }
 
-    // Otherwise, second topic / second attempt requires annual subscription
+    // Determine if this is the first topic of this subject
+    let isFirstTopicOfSubject = true;
+    if (topic.subject) {
+      const subject = await this.subjectModel.findById(topic.subject).populate('topics').exec();
+      if (subject && Array.isArray(subject.topics) && subject.topics.length > 0) {
+        const firstTopicId = ((subject.topics[0] as any)?._id || subject.topics[0]).toString();
+        isFirstTopicOfSubject = firstTopicId === topicId.toString();
+      }
+    }
+
+    // If it is NOT the first topic of this subject, subscription is required
+    if (!isFirstTopicOfSubject) {
+      return {
+        canAccess: false,
+        hasSubscription: false,
+        isGracePeriod: false,
+        isFreeTrial: false,
+        reason: 'subscription_required',
+        message: 'You have completed your complimentary topic for this subject. Subscribe to unlock all topics, lessons, and practice quizzes.',
+      };
+    }
+
+    // If accessing a specific lesson inside the complimentary first topic:
+    // The first lesson (and its quiz exercises) is complimentary.
+    if (lessonId && Array.isArray(topic.lessons) && topic.lessons.length > 0) {
+      const firstLessonId = ((topic.lessons[0] as any)?._id || topic.lessons[0]).toString();
+      const isFirstLesson = firstLessonId === lessonId.toString();
+
+      if (!isFirstLesson) {
+        return {
+          canAccess: false,
+          hasSubscription: false,
+          isGracePeriod: false,
+          isFreeTrial: false,
+          reason: 'subscription_required',
+          message: 'This lesson is locked. Subscribe to unlock all lessons in this subject.',
+        };
+      }
+    }
+
+    // Access granted as complimentary first topic for this subject
     return {
-      canAccess: false,
+      canAccess: true,
       hasSubscription: false,
       isGracePeriod: false,
-      isFreeTrial: false,
-      reason: 'subscription_required',
-      message:
-        'You have completed your complimentary first topic! Please subscribe to unlock all lessons, subjects, and quizzes.',
+      isFreeTrial: true,
+      message: 'Complimentary access for your first lesson topic in this subject.',
     };
   }
 

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { DashboardService } from './dashboard.service';
 
@@ -6,6 +6,18 @@ import { DashboardService } from './dashboard.service';
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
+
+  @Get('student')
+  @ApiOperation({ summary: 'Get live student dashboard overview, active class subjects, overall progress, and recent activity' })
+  @ApiResponse({ status: 200, description: 'Live student dashboard overview' })
+  getStudentDashboard(
+    @Request() req: any,
+    @Query('userId') userId?: string,
+    @Query('classLevel') classLevel?: string,
+  ) {
+    const resolvedUserId = req.user?.id || req.user?._id || userId;
+    return this.dashboardService.getStudentDashboardData(resolvedUserId, classLevel);
+  }
 
   @Get('admin')
   @ApiOperation({ summary: 'Get live admin dashboard metrics, recent activities, and announcements' })

@@ -50,12 +50,84 @@ export class QuizzesService {
     return this.createQuizGeneric({ ...data, topic: topicId });
   }
 
-  async findQuizzesByLesson(lessonId: string): Promise<Quiz[]> {
+  async findQuizzesByLesson(lessonId: string): Promise<any[]> {
     const objectId = Types.ObjectId.isValid(lessonId) ? new Types.ObjectId(lessonId) : null;
     const filter = objectId
       ? { $or: [{ lesson: lessonId as any }, { lesson: objectId as any }] }
       : { lesson: lessonId as any };
-    return this.quizModel.find(filter).exec();
+
+    // 1. Check legacy Quiz collection
+    const quizzes = await this.quizModel.find(filter).lean().exec();
+
+    // 2. Also check Exercise collection where lesson matches ID or title
+    let exercises: any[] = [];
+    try {
+      let lessonTitle = '';
+      if (objectId) {
+        const lessonDoc = await this.lessonModel.findById(objectId).lean().exec();
+        if (lessonDoc) {
+          lessonTitle = lessonDoc.title || '';
+          // If lesson has explicit exercises populated or attached:
+          if (Array.isArray(lessonDoc.exercises) && lessonDoc.exercises.length > 0) {
+            const attachedEx = await this.exerciseModel
+              .find({ _id: { $in: lessonDoc.exercises } })
+              .lean()
+              .exec();
+            exercises.push(...attachedEx);
+          }
+          if (lessonDoc.quiz) {
+            const attachedQ = await this.exerciseModel
+              .findById(lessonDoc.quiz)
+              .lean()
+              .exec();
+            if (attachedQ) exercises.push(attachedQ);
+          }
+        }
+      }
+
+      const exerciseFilter: any[] = [{ lesson: lessonId }];
+      if (objectId) exerciseFilter.push({ lesson: objectId.toString() });
+      if (lessonTitle) exerciseFilter.push({ lesson: lessonTitle });
+
+      const directExercises = await this.exerciseModel
+        .find({ $or: exerciseFilter })
+        .lean()
+        .exec();
+      exercises.push(...directExercises);
+    } catch (e) {
+      // Ignore
+    }
+
+    // Deduplicate exercises by _id
+    const seenEx = new Set<string>();
+    const uniqueExercises = exercises.filter((ex) => {
+      const id = ex?._id?.toString();
+      if (!id || seenEx.has(id)) return false;
+      seenEx.add(id);
+      return true;
+    });
+
+    // Format exercises into quiz shape with questions
+    const formattedExercises = uniqueExercises.map((ex) => ({
+      _id: ex._id,
+      title: ex.title,
+      topic: ex.topic || ex.subject,
+      lesson: lessonId,
+      questions: (ex.questions || []).map((q: any) => ({
+        questionText: q.questionText,
+        options: q.options || [],
+        correctOptionIndex: q.correctOptionIndex ?? 0,
+        hint: q.hint || '',
+        explanation: q.explanation || '',
+      })),
+      isExercise: true,
+      points: ex.points || 10,
+      estimatedMinutes: ex.estimatedMinutes || 15,
+    }));
+
+    // Combine both: if any found, return combined list (quizzes + exercises)
+    const combined = [...quizzes, ...formattedExercises];
+    return combined;
   }
 
   async findAllQuizzes(): Promise<Quiz[]> {

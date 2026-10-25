@@ -6,6 +6,7 @@ import { SchoolClass, SchoolClassDocument } from '../classes/schemas/class.schem
 import { Subject, SubjectDocument } from '../subjects/schemas/subject.schema';
 import { Lesson, LessonDocument } from '../subjects/schemas/lesson.schema';
 import { Quiz, QuizDocument } from '../quizzes/schemas/quiz.schema';
+import { QuizResult, QuizResultDocument } from '../quizzes/schemas/quiz-result.schema';
 import { Announcement, AnnouncementDocument } from './schemas/announcement.schema';
 
 @Injectable()
@@ -16,6 +17,7 @@ export class DashboardService {
     @InjectModel(Subject.name) private subjectModel: Model<SubjectDocument>,
     @InjectModel(Lesson.name) private lessonModel: Model<LessonDocument>,
     @InjectModel(Quiz.name) private quizModel: Model<QuizDocument>,
+    @InjectModel(QuizResult.name) private quizResultModel: Model<QuizResultDocument>,
     @InjectModel(Announcement.name) private announcementModel: Model<AnnouncementDocument>,
   ) {}
 
@@ -278,5 +280,134 @@ export class DashboardService {
       })),
     };
   }
+
+  /**
+   * Return live student dashboard data strictly from MongoDB
+   */
+  async getStudentDashboardData(userId?: string, requestedClass?: string) {
+    let studentUser: any = null;
+    if (userId) {
+      studentUser = await this.userModel.findById(userId).lean().exec();
+    }
+
+    const effectiveClass = (requestedClass || studentUser?.class || '').trim();
+
+    // Fetch subjects for student's class
+    const filter: any = {};
+    if (effectiveClass) {
+      const regex = new RegExp(`^${effectiveClass}$`, 'i');
+      filter.$or = [
+        { classes: { $in: [effectiveClass, regex] } },
+        { classLevel: regex },
+      ];
+    }
+
+    const subjectsDocs = await this.subjectModel
+      .find(filter)
+      .populate({
+        path: 'topics',
+        populate: {
+          path: 'lessons',
+        },
+      })
+      .lean()
+      .exec();
+
+    // Calculate total topics and lessons across class subjects
+    let totalTopicsCount = 0;
+    let totalLessonsCount = 0;
+
+    const subjectsWithProgress = subjectsDocs.map((subj: any) => {
+      const topics = subj.topics || [];
+      const topicCount = topics.length;
+      totalTopicsCount += topicCount;
+
+      let subjectLessonsCount = 0;
+      topics.forEach((t: any) => {
+        if (t.lessons && Array.isArray(t.lessons)) {
+          subjectLessonsCount += t.lessons.length;
+          totalLessonsCount += t.lessons.length;
+        }
+      });
+
+      // Calculate completed topics from user's attendedTopics or completedLessons
+      const completedTopicsInSubj = topics.filter((t: any) =>
+        studentUser?.attendedTopics?.includes(String(t._id))
+      ).length;
+
+      const progressPercent = topicCount > 0 ? Math.round((completedTopicsInSubj / topicCount) * 100) : 0;
+
+      return {
+        _id: String(subj._id),
+        name: subj.name,
+        classLevel: subj.classLevel || effectiveClass,
+        totalTopics: topicCount,
+        completedTopics: completedTopicsInSubj,
+        progress: progressPercent,
+      };
+    });
+
+    const userCompletedTopics = studentUser?.attendedTopics?.length || 0;
+    const overallProgressPercent = totalTopicsCount > 0
+      ? Math.min(100, Math.round((userCompletedTopics / totalTopicsCount) * 100))
+      : 0;
+
+    // Current learning: determine first available subject/topic or active lesson
+    let currentLearning: any = null;
+    if (subjectsDocs.length > 0) {
+      const firstSubj: any = subjectsDocs[0];
+      const firstTopic: any = firstSubj.topics && firstSubj.topics[0];
+      if (firstTopic) {
+        currentLearning = {
+          subjectId: String(firstSubj._id),
+          subjectName: firstSubj.name,
+          topicId: String(firstTopic._id),
+          topicTitle: firstTopic.title,
+          status: 'In Progress',
+          totalLessons: firstTopic.lessons?.length || 0,
+          completedLessons: 0,
+        };
+      }
+    }
+
+    // Recent activity & Quiz results
+    let recentQuizResults: any[] = [];
+    if (userId) {
+      const results = await this.quizResultModel
+        .find({ user: userId } as any)
+        .populate('quiz')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean()
+        .exec();
+
+      recentQuizResults = results.map((r: any) => ({
+        id: String(r._id),
+        title: (r.quiz as any)?.title || 'Exercise Quiz',
+        score: `${r.score}/${r.totalQuestions}`,
+        passed: !!r.passed,
+        createdAt: r.createdAt,
+      }));
+    }
+
+    return {
+      student: {
+        name: studentUser ? `${studentUser.firstName} ${studentUser.lastName}`.trim() : 'Student',
+        firstName: studentUser?.firstName || 'Student',
+        class: effectiveClass,
+        school: studentUser?.school || '',
+      },
+      overallProgress: {
+        percentage: overallProgressPercent,
+        completedTopics: userCompletedTopics,
+        totalTopics: totalTopicsCount,
+        totalLessons: totalLessonsCount,
+      },
+      currentLearning,
+      subjects: subjectsWithProgress,
+      recentQuizResults,
+    };
+  }
 }
+
 

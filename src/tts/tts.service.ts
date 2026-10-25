@@ -173,11 +173,71 @@ export class TtsService {
       }
     }
 
+    // Try ttsmp3.com high-quality neural voice synthesis
+    try {
+      const ttsMp3Result = await this.synthesizeWithTtsMp3(cleanText, voiceId);
+      if (ttsMp3Result) {
+        this.totalAudiosGenerated++;
+        return ttsMp3Result;
+      }
+    } catch (ttsErr: any) {
+      this.logger.warn(`ttsmp3.com synthesis fallback due to: ${ttsErr.message}`);
+    }
+
     // High-fidelity educational speech synthesizer fallback (valid MP3 audio frame header)
     const fallbackBuffer = this.generateFallbackMp3Audio(cleanText);
     const estimatedDuration = Math.max(5, Math.round(cleanText.length / 12.5));
     this.totalAudiosGenerated++;
     return { buffer: fallbackBuffer, duration: estimatedDuration };
+  }
+
+  /**
+   * Synthesize audio using ttsmp3.com API service
+   */
+  private async synthesizeWithTtsMp3(
+    text: string,
+    voiceId: string,
+  ): Promise<{ buffer: Buffer; duration: number } | null> {
+    const voiceMapping: Record<string, string> = {
+      'en-US-Neural2-F': 'Joanna',
+      'en-US-Neural2-D': 'Joey',
+      'en-US-Journey-F': 'Kendra',
+      'en-GB-Neural2-B': 'Brian',
+      'en-GB-Neural2-A': 'Amy',
+      'en-NG-Standard-A': 'Ayanda',
+    };
+    const speaker = voiceMapping[voiceId] || 'Amy';
+
+    const axios = require('axios');
+    const params = new URLSearchParams();
+    // Trim text if necessary (ttsmp3 free tier limit per request)
+    const truncated = text.length > 3000 ? text.substring(0, 3000) : text;
+    params.append('msg', truncated);
+    params.append('lang', speaker);
+    params.append('source', 'ttsmp3');
+
+    const res = await axios.post('https://ttsmp3.com/makemp3_new.php', params.toString(), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (compatible; KSchoolmate/1.0; EduAudio)',
+      },
+      timeout: 15000,
+    });
+
+    if (res.data && res.data.Error === 0 && res.data.URL) {
+      const audioUrl = res.data.URL;
+      const audioRes = await axios.get(audioUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000,
+      });
+
+      const buffer = Buffer.from(audioRes.data);
+      const estimatedDuration = Math.max(5, Math.round(truncated.length / 12.5));
+      this.logger.log(`Generated TTS MP3 via ttsmp3.com (Speaker: ${speaker}, Bytes: ${buffer.length})`);
+      return { buffer, duration: estimatedDuration };
+    }
+
+    return null;
   }
 
   /**

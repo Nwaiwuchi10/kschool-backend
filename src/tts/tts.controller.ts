@@ -50,6 +50,22 @@ export class TtsController {
     return this.ttsService.previewAudio(text, voiceId);
   }
 
+  @Post('synthesize')
+  @ApiOperation({ summary: 'Synthesize speech on-the-fly for lesson read-aloud in mobile app' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['text'],
+      properties: { text: { type: 'string' }, voiceId: { type: 'string' } },
+    },
+  })
+  synthesizeSpeech(
+    @Body('text') text: string,
+    @Body('voiceId') voiceId?: string,
+  ) {
+    return this.ttsService.previewAudio(text, voiceId || 'en-GB-Neural2-A');
+  }
+
   @Get('voices')
   @ApiOperation({ summary: 'Get list of supported Google Cloud Neural2/Journey voices' })
   getSupportedVoices() {
