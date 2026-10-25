@@ -69,7 +69,7 @@ export class QuizzesService {
       .exec();
   }
 
-  async findQuizById(id: string): Promise<Quiz> {
+  async findQuizById(id: string): Promise<any> {
     const quiz = await this.quizModel
       .findById(id)
       .populate({
@@ -77,21 +77,39 @@ export class QuizzesService {
         populate: { path: 'subject' },
       })
       .exec();
-    if (!quiz) throw new NotFoundException('Quiz not found');
-    return quiz;
+    if (quiz) return quiz;
+
+    // Fallback to Exercise document so exercise seamlessly functions as quiz
+    const exercise = await this.exerciseModel.findById(id).exec();
+    if (exercise) {
+      return {
+        _id: exercise._id,
+        title: exercise.title,
+        description: exercise.description,
+        topic: exercise.topic,
+        lesson: exercise.lesson,
+        questions: exercise.questions,
+        points: exercise.points,
+        estimatedMinutes: exercise.estimatedMinutes,
+        createdAt: (exercise as any).createdAt,
+      };
+    }
+
+    throw new NotFoundException('Quiz or Exercise not found');
   }
 
   async submitQuiz(userId: string, quizId: string, answers: number[]): Promise<QuizResult> {
     const quiz = await this.findQuizById(quizId);
     
     let score = 0;
-    quiz.questions.forEach((q, index) => {
+    const questions = quiz.questions || [];
+    questions.forEach((q: any, index: number) => {
       if (answers[index] === q.correctOptionIndex) {
         score++;
       }
     });
 
-    const totalQuestions = quiz.questions.length;
+    const totalQuestions = questions.length || 1;
     const passed = (score / totalQuestions) >= 0.7; // 70% passing grade
 
     const result = new this.resultModel({
