@@ -151,7 +151,31 @@ export class QuizzesService {
   // ==========================================
   async createExercise(data: any): Promise<Exercise> {
     const exercise = new this.exerciseModel(data);
-    return exercise.save();
+    const saved = await exercise.save();
+
+    // If linked to a lesson, attach this exercise to the lesson
+    if (data.lesson && data.lesson.trim()) {
+      try {
+        const isObjectId = Types.ObjectId.isValid(data.lesson);
+        const lessonFilter = isObjectId
+          ? { $or: [{ _id: data.lesson }, { title: data.lesson.trim() }] }
+          : { title: data.lesson.trim() };
+
+        await this.lessonModel.updateMany(lessonFilter, {
+          $addToSet: { exercises: saved._id },
+          $setOnInsert: { quiz: saved._id },
+        });
+        // Ensure quiz field is populated if null
+        await this.lessonModel.updateMany(
+          { ...lessonFilter, quiz: { $exists: false } },
+          { $set: { quiz: saved._id } },
+        );
+      } catch (err) {
+        // Non-fatal
+      }
+    }
+
+    return saved;
   }
 
   async findAllExercises(filter?: { classLevel?: string; subject?: string }): Promise<Exercise[]> {
@@ -174,11 +198,38 @@ export class QuizzesService {
   async updateExercise(id: string, data: any): Promise<Exercise> {
     const exercise = await this.exerciseModel.findByIdAndUpdate(id, data, { new: true }).exec();
     if (!exercise) throw new NotFoundException('Exercise not found');
+
+    // If linked to a lesson on update, attach to lesson
+    if (data.lesson && data.lesson.trim()) {
+      try {
+        const isObjectId = Types.ObjectId.isValid(data.lesson);
+        const lessonFilter = isObjectId
+          ? { $or: [{ _id: data.lesson }, { title: data.lesson.trim() }] }
+          : { title: data.lesson.trim() };
+
+        await this.lessonModel.updateMany(lessonFilter, {
+          $addToSet: { exercises: exercise._id },
+        });
+      } catch (err) {
+        // Non-fatal
+      }
+    }
+
     return exercise;
   }
 
   async deleteExercise(id: string): Promise<void> {
     const exercise = await this.exerciseModel.findByIdAndDelete(id).exec();
     if (!exercise) throw new NotFoundException('Exercise not found');
+
+    // Remove from any lessons that attached it
+    try {
+      await this.lessonModel.updateMany(
+        { exercises: exercise._id },
+        { $pull: { exercises: exercise._id } },
+      );
+    } catch (err) {
+      // Non-fatal
+    }
   }
 }
