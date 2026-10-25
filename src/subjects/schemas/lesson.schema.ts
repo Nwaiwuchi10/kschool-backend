@@ -43,9 +43,13 @@ export class Lesson {
   @Prop({ default: 0 })
   voiceNoteDuration?: number; // duration in seconds
 
-  // Attached Quiz / Exercise for this lesson
+  // Attached Quiz / Exercise for this lesson (single legacy link)
   @Prop({ type: Types.ObjectId, ref: 'Quiz', required: false })
   quiz?: Types.ObjectId;
+
+  // Attached List of Exercises / Quizzes for this lesson
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Exercise' }], default: [] })
+  exercises: Types.ObjectId[];
 
   // Text-to-Speech & Audio Metadata
   @Prop()

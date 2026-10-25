@@ -163,11 +163,16 @@ export class SubjectsService {
       ? [data.subjectId]
       : [];
 
+    const exercises = Array.isArray(data.exercises) ? data.exercises.filter(Boolean) : [];
+    const quiz = data.quiz || (exercises.length > 0 ? exercises[0] : undefined);
+
     const lesson = new this.lessonModel({
       ...data,
       topic: topicId || undefined,
       subjects,
       classes: data.classes || [],
+      exercises,
+      quiz,
     });
     const savedLesson = await lesson.save();
 
@@ -204,6 +209,7 @@ export class SubjectsService {
     return this.lessonModel.find(filter)
       .populate('subjects')
       .populate('quiz')
+      .populate('exercises')
       .populate({
         path: 'topic',
         populate: { path: 'subject' },
@@ -216,6 +222,7 @@ export class SubjectsService {
     const lesson = await this.lessonModel.findById(id)
       .populate('subjects')
       .populate('quiz')
+      .populate('exercises')
       .populate({
         path: 'topic',
         populate: { path: 'subject' },
@@ -233,9 +240,17 @@ export class SubjectsService {
     if (Array.isArray(data.subjects)) {
       updateData.subjects = data.subjects.filter(Boolean);
     }
+    if (Array.isArray(data.exercises)) {
+      updateData.exercises = data.exercises.filter(Boolean);
+      // If quiz is not explicitly set, default to first exercise in the list
+      if (!updateData.quiz && updateData.exercises.length > 0) {
+        updateData.quiz = updateData.exercises[0];
+      }
+    }
     const lesson = await this.lessonModel.findByIdAndUpdate(id, updateData, { new: true })
       .populate('subjects')
       .populate('quiz')
+      .populate('exercises')
       .populate({
         path: 'topic',
         populate: { path: 'subject' },
