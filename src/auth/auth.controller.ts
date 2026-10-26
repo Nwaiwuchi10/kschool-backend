@@ -1,4 +1,4 @@
-import { Controller, Post, Patch, Body, HttpCode, HttpStatus, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, HttpCode, HttpStatus, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
@@ -68,6 +68,16 @@ export class AuthController {
   changePassword(@Req() req: any, @Body() changePasswordDto: ChangePasswordDto) {
     const userId = req.user?.id || req.user?._id;
     return this.authService.changePassword(userId, changePasswordDto);
+  }
+
+  @Get('profile')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get profile for logged in user' })
+  @ApiResponse({ status: 200, description: 'Profile retrieved successfully' })
+  getProfile(@Req() req: any) {
+    const userId = req.user?.id || req.user?._id;
+    return this.authService.getProfile(userId);
   }
 
   @Patch('profile')

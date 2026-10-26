@@ -97,6 +97,28 @@ export class AuthService {
     };
   }
 
+  async getProfile(userId: string) {
+    const user: any = await this.usersService.findOne(userId);
+    if (!user) throw new NotFoundException('User not found');
+    return {
+      id: user._id || user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      role: user.role,
+      class: user.class,
+      classes: user.classes || (user.class ? [user.class] : []),
+      subject: user.subject,
+      subjects: user.subjects || (user.subject ? [user.subject] : []),
+      school: user.school,
+      avatar: user.avatar || '',
+      attendedTopics: user.attendedTopics || [],
+      completedLessons: user.completedLessons || [],
+      freeTrialUsed: !!user.freeTrialUsed,
+    };
+  }
+
   async updateProfile(userId: string, updateDto: any) {
     const updatedUser: any = await this.usersService.update(userId, updateDto);
     return {
@@ -114,6 +136,9 @@ export class AuthService {
         subjects: updatedUser.subjects || (updatedUser.subject ? [updatedUser.subject] : []),
         school: updatedUser.school,
         avatar: (updatedUser as any).avatar || '',
+        attendedTopics: updatedUser.attendedTopics || [],
+        completedLessons: updatedUser.completedLessons || [],
+        freeTrialUsed: !!updatedUser.freeTrialUsed,
       },
     };
   }
