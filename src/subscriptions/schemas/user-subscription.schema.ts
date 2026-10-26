@@ -19,7 +19,7 @@ export class UserSubscription {
   @Prop({ required: true, unique: true })
   reference: string;
 
-  @Prop({ default: 'monnify' })
+  @Prop({ default: 'paystack' })
   paymentGateway: string;
 
   @Prop({ required: true })

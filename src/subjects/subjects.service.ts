@@ -79,7 +79,7 @@ export class SubjectsService {
     }).exec();
   }
 
-  async findSubjectById(id: string): Promise<Subject> {
+  async findSubjectById(id: string): Promise<any> {
     const subject = await this.subjectModel.findById(id).populate({
       path: 'topics',
       populate: {
@@ -87,7 +87,56 @@ export class SubjectsService {
       },
     }).exec();
     if (!subject) throw new NotFoundException('Subject not found');
-    return subject;
+
+    const subjectObj: any = subject.toObject ? subject.toObject() : subject;
+
+    // Find any lessons assigned directly to this subject
+    const subjectLessons = await this.lessonModel.find({
+      $or: [
+        { subjects: id },
+        { subjects: { $in: [id] } },
+      ],
+    }).exec();
+
+    // Also check lessons matching subject name if needed
+    const nameMatches = await this.lessonModel.find({
+      subjects: { $size: 0 },
+      classes: { $in: subjectObj.classes || [] },
+    }).exec();
+
+    const allLinkedLessons = [...subjectLessons];
+    const existingIds = new Set(allLinkedLessons.map((l: any) => l._id.toString()));
+
+    // Collect all lesson IDs already assigned to topics
+    const assignedLessonIds = new Set<string>();
+    if (Array.isArray(subjectObj.topics)) {
+      subjectObj.topics.forEach((t: any) => {
+        if (Array.isArray(t.lessons)) {
+          t.lessons.forEach((l: any) => {
+            if (l && l._id) assignedLessonIds.add(l._id.toString());
+          });
+        }
+      });
+    }
+
+    // If there are unassigned lessons linked to this subject, attach them to the first topic or create a syllabus topic
+    const unassigned = allLinkedLessons.filter((l) => !assignedLessonIds.has(l._id.toString()));
+    if (unassigned.length > 0) {
+      if (!subjectObj.topics || subjectObj.topics.length === 0) {
+        subjectObj.topics = [
+          {
+            _id: 'default-topic-' + id,
+            title: 'General Curriculum Lessons',
+            subject: id,
+            lessons: unassigned,
+          },
+        ];
+      } else {
+        subjectObj.topics[0].lessons = [...(subjectObj.topics[0].lessons || []), ...unassigned];
+      }
+    }
+
+    return subjectObj;
   }
 
   async createTopic(subjectId: string, data: any): Promise<Topic> {

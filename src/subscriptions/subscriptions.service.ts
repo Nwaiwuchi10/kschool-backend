@@ -60,7 +60,7 @@ export class SubscriptionsService {
     packageId: string,
     reference: string,
     amountPaid: number,
-    paymentGateway: string = 'monnify',
+    paymentGateway: string = 'paystack',
     classLevel?: string,
   ): Promise<UserSubscription> {
     const pkg = await this.findPackageById(packageId);
@@ -486,7 +486,7 @@ export class SubscriptionsService {
         classLevel: sub.classLevel || sub.user?.class || '—',
         packageName: sub.package?.name || 'Annual Package',
         amount: amount,
-        paymentGateway: sub.paymentGateway || 'monnify',
+        paymentGateway: sub.paymentGateway || 'paystack',
         status: inGrace ? 'grace' : isExpired ? 'expired' : sub.status,
         startDate: sub.startDate,
         expiresAt: sub.expiresAt,

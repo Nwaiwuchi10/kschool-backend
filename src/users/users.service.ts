@@ -165,4 +165,24 @@ export class UsersService {
     user.resetPasswordExpires = undefined;
     return user.save();
   }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<UserDocument> {
+    const user = await this.userModel.findById(userId).select('+password').exec();
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (!user.password) {
+      throw new ConflictException('No password set for this account');
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      throw new ConflictException('Current password does not match');
+    }
+
+    const salt = await bcrypt.genSalt();
+    user.password = await bcrypt.hash(newPassword, salt);
+    return user.save();
+  }
 }

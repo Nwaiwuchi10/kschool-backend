@@ -431,7 +431,7 @@ export class MailService {
         </div>
 
         <p style="margin: 20px 0 0 0; font-size: 13px; color: #6B7280;">
-          Open the KSCHOOLMATE mobile app to renew your subscription via Monnify.
+          Open the KSCHOOLMATE mobile app to renew your subscription via Paystack.
         </p>
       `;
 

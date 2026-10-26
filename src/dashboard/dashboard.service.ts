@@ -335,7 +335,7 @@ export class DashboardService {
         studentUser?.attendedTopics?.includes(String(t._id))
       ).length;
 
-      const progressPercent = topicCount > 0 ? Math.round((completedTopicsInSubj / topicCount) * 100) : 0;
+      const progressPercent = topicCount > 0 ? Math.min(100, Math.max(0, Math.round((completedTopicsInSubj / topicCount) * 100))) : 0;
 
       return {
         _id: String(subj._id),

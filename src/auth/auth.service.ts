@@ -7,6 +7,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -87,6 +88,36 @@ export class AuthService {
     };
   }
 
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.usersService.changePassword(userId, dto.currentPassword, dto.newPassword);
+    this.mailService.sendPasswordChangedEmail?.(user)?.catch?.(e => console.error('Password changed email error', e));
+
+    return {
+      message: 'Password changed successfully',
+    };
+  }
+
+  async updateProfile(userId: string, updateDto: any) {
+    const updatedUser: any = await this.usersService.update(userId, updateDto);
+    return {
+      message: 'Profile updated successfully',
+      user: {
+        id: updatedUser._id || updatedUser.id,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName,
+        email: updatedUser.email,
+        phoneNumber: updatedUser.phoneNumber,
+        role: updatedUser.role,
+        class: updatedUser.class,
+        classes: updatedUser.classes || (updatedUser.class ? [updatedUser.class] : []),
+        subject: updatedUser.subject,
+        subjects: updatedUser.subjects || (updatedUser.subject ? [updatedUser.subject] : []),
+        school: updatedUser.school,
+        avatar: (updatedUser as any).avatar || '',
+      },
+    };
+  }
+
   private generateToken(user: any) {
     const payload = { 
       email: user.email, 
@@ -109,6 +140,7 @@ export class AuthService {
         subjects: user.subjects || (user.subject ? [user.subject] : []),
         permissions: user.permissions || [],
         school: user.school,
+        avatar: user.avatar || '',
       }
     };
   }

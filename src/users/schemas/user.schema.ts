@@ -27,6 +27,9 @@ export class User {
   phoneNumber: string;
 
   @Prop()
+  avatar?: string;
+
+  @Prop()
   class: string;
 
   @Prop()

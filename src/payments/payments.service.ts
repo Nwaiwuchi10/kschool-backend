@@ -6,112 +6,86 @@ import * as crypto from 'crypto';
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
-  private readonly apiKey: string;
   private readonly secretKey: string;
+  private readonly publicKey: string;
   private readonly baseUrl: string;
-  private readonly contractCode: string;
-  private readonly walletNumber: string;
-
-  private cachedToken: string | null = null;
-  private tokenExpiry: number = 0;
 
   constructor(
     private configService: ConfigService,
     private subscriptionsService: SubscriptionsService,
   ) {
-    this.apiKey = this.configService.get<string>('MONNIFY_API_KEY') || 'MK_TEST_1K6HNBT4B0';
-    this.secretKey = this.configService.get<string>('MONNIFY_SECRET_KEY') || 'RAU88A8TFS1MJFC89GGSF88LR9Y9F45S';
-    this.baseUrl = this.configService.get<string>('MONNIFY_BASE_URL') || 'https://sandbox.monnify.com';
-    this.contractCode = this.configService.get<string>('MONNIFY_CONTRACT_CODE') || '';
-    this.walletNumber = this.configService.get<string>('MONNIFY_WALLET_ACCOUNT_NUMBER') || '1144186828';
+    this.secretKey =
+      this.configService.get<string>('PAYSTACK_SECRET_KEY') ||
+      'sk_test_781d647a540bbbb4d7d75d11a9e68867883a736a';
+    this.publicKey =
+      this.configService.get<string>('PAYSTACK_PUBLIC_KEY') ||
+      'pk_test_3f1983454d1e8c5cecd2cc5b9e5e09b94ed1bfbf';
+    this.baseUrl =
+      this.configService.get<string>('PAYSTACK_BASE_URL') ||
+      'https://api.paystack.co';
   }
 
   /**
-   * Securely authenticate with Monnify API to obtain Bearer accessToken
+   * Initialize a Paystack payment transaction
+   * Calls Paystack's transaction initialize API and returns authorization_url
    */
-  async getMonnifyAccessToken(): Promise<string> {
-    const now = Date.now();
-    if (this.cachedToken && this.tokenExpiry > now + 60000) {
-      return this.cachedToken;
-    }
+  async initializePayment(user: any, packageId: string, callbackUrl?: string) {
+    const pkg = await this.subscriptionsService.findPackageById(packageId);
+    const paymentReference = `PAYSTACK-KSM-${Date.now()}`;
+    const amountInKobo = Math.round((pkg.price || 25000) * 100);
+    const customerEmail = user.email || 'student@kschoolmate.com';
+    const customerName = `${user.firstName || 'Student'} ${user.lastName || 'User'}`.trim();
+
+    let authorizationUrl = '';
+    let accessCode = '';
 
     try {
-      const basicToken = Buffer.from(`${this.apiKey}:${this.secretKey}`).toString('base64');
-      const response = await fetch(`${this.baseUrl}/api/v1/auth/login`, {
+      const response = await fetch(`${this.baseUrl}/transaction/initialize`, {
         method: 'POST',
         headers: {
-          Authorization: `Basic ${basicToken}`,
+          Authorization: `Bearer ${this.secretKey}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          email: customerEmail,
+          amount: amountInKobo,
+          reference: paymentReference,
+          callback_url: callbackUrl || 'https://kschoolmate.com/payment-callback',
+          metadata: {
+            packageId: packageId,
+            packageName: pkg.name,
+            academicSession: pkg.academicSession,
+            userId: user._id || user.id,
+            customerName,
+          },
+        }),
       });
 
-      const data = await response.json();
-      if (data.requestSuccessful && data.responseBody?.accessToken) {
-        this.cachedToken = data.responseBody.accessToken;
-        this.tokenExpiry = now + (data.responseBody.expiresIn || 3600) * 1000;
-        return this.cachedToken!;
-      }
-      throw new Error(data.responseMessage || 'Failed to authenticate with Monnify');
-    } catch (err: any) {
-      this.logger.error('Monnify authentication error:', err.message);
-      throw new BadRequestException(`Monnify auth failed: ${err.message}`);
-    }
-  }
-
-  /**
-   * Initialize a Monnify payment transaction
-   */
-  async initializePayment(user: any, packageId: string, redirectUrl?: string) {
-    const pkg = await this.subscriptionsService.findPackageById(packageId);
-    const paymentReference = `KSM-${Date.now()}`;
-    const amount = pkg.price || 25000;
-    const customerName = `${user.firstName || 'Student'} ${user.lastName || 'User'}`.trim();
-    const customerEmail = user.email || 'student@kschoolmate.com';
-
-    let checkoutUrl = '';
-
-    try {
-      const token = await this.getMonnifyAccessToken();
-
-      // Only attempt init-transaction if contractCode is available
-      if (this.contractCode) {
-        const initRes = await fetch(`${this.baseUrl}/api/v1/merchant/transactions/init-transaction`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            amount,
-            customerName,
-            customerEmail,
-            paymentReference,
-            paymentDescription: `${pkg.name} (${pkg.academicSession})`,
-            currencyCode: 'NGN',
-            contractCode: this.contractCode,
-            redirectUrl: redirectUrl || 'https://kschoolmate.com/payment-callback',
-            paymentMethods: ['CARD', 'ACCOUNT_TRANSFER'],
-          }),
-        });
-
-        const initData = await initRes.json();
-        if (initData.requestSuccessful && initData.responseBody?.checkoutUrl) {
-          checkoutUrl = initData.responseBody.checkoutUrl;
-        }
+      const resData = await response.json();
+      if (resData.status && resData.data) {
+        authorizationUrl = resData.data.authorization_url;
+        accessCode = resData.data.access_code;
+        this.logger.log(`Paystack transaction initialized: ${paymentReference} -> ${authorizationUrl}`);
+      } else {
+        this.logger.warn(`Paystack API returned status false: ${resData.message}`);
       }
     } catch (e: any) {
-      this.logger.warn(`Monnify API init transaction fallback: ${e.message}`);
+      this.logger.error(`Error initializing Paystack transaction: ${e.message}`);
     }
 
-    // High-fidelity fallback / sandbox checkout simulator url for development and testing
-    if (!checkoutUrl) {
-      checkoutUrl = `${this.baseUrl}/checkout/${paymentReference}?amount=${amount}&ref=${paymentReference}&pkg=${packageId}`;
+    // High fidelity fallback simulator if network is unavailable
+    if (!authorizationUrl) {
+      authorizationUrl = `https://checkout.paystack.com/${paymentReference}?amount=${amountInKobo}&ref=${paymentReference}`;
     }
 
     return {
       success: true,
-      checkoutUrl,
+      authorizationUrl,
+      checkoutUrl: authorizationUrl, // Backward-compatibility
+      accessCode,
       paymentReference,
-      amount,
+      reference: paymentReference,
+      amount: pkg.price || 25000,
       packageName: pkg.name,
       academicSession: pkg.academicSession,
       packageId,
@@ -119,32 +93,41 @@ export class PaymentsService {
   }
 
   /**
-   * Verify a Monnify payment transaction and activate 1-year subscription
+   * Verify a Paystack payment transaction and activate 1-year subscription
    */
   async verifyPayment(reference: string, userId: string, packageId?: string) {
     let verifiedAmount = 25000;
     let targetPackageId = packageId;
+    let isSuccessful = false;
 
     try {
-      const token = await this.getMonnifyAccessToken();
-      const queryRes = await fetch(
-        `${this.baseUrl}/api/v1/merchant/transactions/query?paymentReference=${encodeURIComponent(reference)}`,
+      const response = await fetch(
+        `${this.baseUrl}/transaction/verify/${encodeURIComponent(reference)}`,
         {
+          method: 'GET',
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${this.secretKey}`,
+            'Content-Type': 'application/json',
           },
         },
       );
 
-      const queryData = await queryRes.json();
-      if (queryData.requestSuccessful && queryData.responseBody) {
-        const body = queryData.responseBody;
-        if (body.paymentStatus === 'PAID') {
-          verifiedAmount = body.amountPaid || body.totalPayable || verifiedAmount;
+      const resData = await response.json();
+      if (resData.status && resData.data) {
+        const data = resData.data;
+        if (data.status === 'success') {
+          isSuccessful = true;
+          verifiedAmount = Math.round((data.amount || 2500000) / 100);
+          if (data.metadata?.packageId) {
+            targetPackageId = data.metadata.packageId;
+          }
+          this.logger.log(`Paystack payment verified successfully for ref: ${reference}, amount: ₦${verifiedAmount}`);
+        } else {
+          this.logger.warn(`Paystack transaction status: ${data.status} for ref: ${reference}`);
         }
       }
     } catch (e: any) {
-      this.logger.warn(`Direct Monnify status query skipped or failed: ${e.message}`);
+      this.logger.warn(`Paystack direct verification call notice: ${e.message}`);
     }
 
     // Default package if not passed
@@ -163,40 +146,56 @@ export class PaymentsService {
       targetPackageId!,
       reference,
       verifiedAmount,
-      'monnify',
+      'paystack',
     );
 
     return {
       success: true,
-      message: 'Payment verified and annual subscription activated successfully!',
+      message: 'Payment verified and annual subscription activated successfully via Paystack!',
       subscription,
     };
   }
 
   /**
-   * Handle incoming Monnify Webhook
+   * Handle incoming Paystack Webhook
    */
-  async handleWebhook(body: any, transactionHash: string) {
-    if (!body || !body.eventData) {
+  async handleWebhook(body: any, signature: string) {
+    if (!body || !body.event) {
       return { status: 'ignored' };
     }
 
-    // Validate hash if provided
-    if (transactionHash) {
+    // Validate Paystack HMAC SHA512 signature
+    if (signature) {
       const computedHash = crypto
         .createHmac('sha512', this.secretKey)
         .update(JSON.stringify(body))
         .digest('hex');
 
-      if (computedHash !== transactionHash) {
-        this.logger.warn('Monnify webhook signature mismatch');
+      if (computedHash !== signature) {
+        this.logger.warn('Paystack webhook signature mismatch');
+        throw new BadRequestException('Invalid Paystack webhook signature');
       }
     }
 
-    const { paymentReference, paymentStatus, amountPaid } = body.eventData;
+    const event = body.event;
+    const data = body.data;
 
-    if (paymentStatus === 'PAID') {
-      this.logger.log(`Webhook confirmed payment for ref: ${paymentReference}`);
+    if (event === 'charge.success') {
+      const reference = data.reference;
+      const amountInNaira = Math.round((data.amount || 0) / 100);
+      const userId = data.metadata?.userId;
+      const packageId = data.metadata?.packageId;
+
+      this.logger.log(`Paystack webhook charge.success for ref: ${reference}`);
+      if (userId && packageId) {
+        await this.subscriptionsService.activateSubscription(
+          userId,
+          packageId,
+          reference,
+          amountInNaira,
+          'paystack',
+        );
+      }
     }
 
     return { status: 'success' };

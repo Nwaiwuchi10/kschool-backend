@@ -28,6 +28,11 @@ export class CreateUserDto {
   @IsOptional()
   phoneNumber?: string;
 
+  @ApiProperty({ example: 'https://res.cloudinary.com/.../image.jpg', required: false })
+  @IsString()
+  @IsOptional()
+  avatar?: string;
+
   @ApiProperty({ example: 'SS2 - Science', required: false })
   @IsString()
   @IsOptional()
