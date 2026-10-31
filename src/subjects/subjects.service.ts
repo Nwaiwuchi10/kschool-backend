@@ -327,13 +327,45 @@ export class SubjectsService {
   }
 
   async updateLesson(id: string, data: any): Promise<Lesson> {
+    const existingLesson = await this.lessonModel.findById(id).exec();
+    if (!existingLesson) throw new NotFoundException('Lesson not found');
+
     const updateData: any = { ...data };
     if (Array.isArray(data.classes)) {
       updateData.classes = data.classes.filter(Boolean);
     }
     if (Array.isArray(data.subjects)) {
       updateData.subjects = data.subjects.filter(Boolean);
+    } else if (data.subjectId) {
+      updateData.subjects = [data.subjectId];
     }
+
+    // Determine target topic
+    let newTopicId = data.topicId || data.topic;
+
+    // If no topic was explicitly selected, but a subject was selected or changed:
+    if (!newTopicId && updateData.subjects && updateData.subjects.length > 0) {
+      const targetSubjectId = updateData.subjects[0];
+      const subject = await this.subjectModel.findById(targetSubjectId).populate('topics').exec();
+      if (subject && subject.topics && subject.topics.length > 0) {
+        newTopicId = (subject.topics[0] as any)._id;
+      } else if (subject) {
+        // Automatically create a default general topic under the subject
+        const topic = new this.topicModel({
+          title: 'General Curriculum Lessons',
+          subject: subject._id,
+        });
+        const savedTopic = await topic.save();
+        subject.topics.push(savedTopic._id as any);
+        await (subject as any).save();
+        newTopicId = savedTopic._id;
+      }
+    }
+
+    if (newTopicId) {
+      updateData.topic = newTopicId;
+    }
+
     if (Array.isArray(data.exercises)) {
       updateData.exercises = data.exercises.filter(Boolean);
       // If quiz is not explicitly set, default to first exercise in the list
@@ -341,6 +373,7 @@ export class SubjectsService {
         updateData.quiz = updateData.exercises[0];
       }
     }
+
     const lesson = await this.lessonModel.findByIdAndUpdate(id, updateData, { new: true })
       .populate('subjects')
       .populate('quiz')
@@ -351,6 +384,25 @@ export class SubjectsService {
       })
       .exec();
     if (!lesson) throw new NotFoundException('Lesson not found');
+
+    // Sync lesson into Topic's lessons array
+    const oldTopicId = existingLesson.topic ? existingLesson.topic.toString() : null;
+    const finalTopicId = lesson.topic ? (lesson.topic as any)._id?.toString() || lesson.topic.toString() : null;
+
+    if (oldTopicId && oldTopicId !== finalTopicId) {
+      // Remove lesson reference from old topic
+      await this.topicModel.findByIdAndUpdate(oldTopicId, {
+        $pull: { lessons: lesson._id },
+      }).exec();
+    }
+
+    if (finalTopicId) {
+      // Add lesson reference to new topic
+      await this.topicModel.findByIdAndUpdate(finalTopicId, {
+        $addToSet: { lessons: lesson._id },
+      }).exec();
+    }
+
     return lesson;
   }
 
