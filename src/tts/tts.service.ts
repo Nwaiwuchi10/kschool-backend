@@ -227,25 +227,37 @@ export class TtsService {
     }
     if (currentBatch) batches.push(currentBatch);
 
-    // Limit to first 10 batches for instantaneous streaming preview (~1.5 mins audio)
-    const activeBatches = batches.slice(0, 10);
+    // Limit to max 100MB buffer size (approximately 100 * 1024 * 1024 bytes)
+    const MAX_TTS_BUFFER_SIZE = 100 * 1024 * 1024; // 100MB Cloudinary max limit
+    let totalBytesAccumulated = 0;
 
-    for (const batch of activeBatches) {
+    for (const batch of batches) {
+      if (totalBytesAccumulated >= MAX_TTS_BUFFER_SIZE) {
+        this.logger.warn(`TTS audio reached maximum 100MB buffer limit (${totalBytesAccumulated} bytes). Truncating further synthesis.`);
+        break;
+      }
+
       const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(
         batch,
       )}&tl=${encodeURIComponent(langCode.toLowerCase())}&client=tw-ob`;
 
-      const res = await axios.get(url, {
-        responseType: 'arraybuffer',
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-        timeout: 10000,
-      });
+      try {
+        const res = await axios.get(url, {
+          responseType: 'arraybuffer',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+          timeout: 15000,
+        });
 
-      if (res.data) {
-        chunks.push(Buffer.from(res.data));
+        if (res.data) {
+          const chunkBuf = Buffer.from(res.data);
+          chunks.push(chunkBuf);
+          totalBytesAccumulated += chunkBuf.length;
+        }
+      } catch (chunkErr: any) {
+        this.logger.warn(`Batch TTS chunk failed (${chunkErr.message}). Continuing with remaining text...`);
       }
     }
 
@@ -325,6 +337,13 @@ export class TtsService {
    * Save audio buffer primarily to Cloudinary, with local uploads/audio as automatic fallback
    */
   async saveAudioFile(buffer: Buffer, filename: string): Promise<string> {
+    const MAX_ALLOWED_FILE_SIZE = 100 * 1024 * 1024; // 100MB limit
+    if (buffer.length > MAX_ALLOWED_FILE_SIZE) {
+      throw new BadRequestException(
+        `Generated TTS audio file size (${(buffer.length / (1024 * 1024)).toFixed(1)}MB) exceeds the maximum allowed limit of 100MB for Cloudinary uploads.`
+      );
+    }
+
     // 1. Primary: Cloudinary Storage
     if (this.cloudinaryService) {
       try {
