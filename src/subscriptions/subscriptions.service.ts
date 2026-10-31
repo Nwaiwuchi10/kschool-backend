@@ -29,6 +29,34 @@ export class SubscriptionsService {
     private mailService: MailService,
   ) {}
 
+  private normalizeClassName(cls?: string): string {
+    if (!cls) return '';
+    return cls
+      .trim()
+      .toUpperCase()
+      .replace(/^SSS\s+/i, 'SS ')
+      .replace(/\s+/g, ' ');
+  }
+
+  private doesSubscriptionMatchClass(sub: any, targetClass?: string): boolean {
+    if (!targetClass || !targetClass.trim()) return true;
+    const normTarget = this.normalizeClassName(targetClass);
+
+    if (sub.classLevel) {
+      return this.normalizeClassName(sub.classLevel) === normTarget;
+    }
+
+    const pkgName = typeof sub.package === 'object' ? sub.package?.name : '';
+    if (pkgName) {
+      const match = pkgName.match(/(Primary\s+[1-6]|JSS\s+[1-3]|SSS\s+[1-3]|SS\s+[1-3])/i);
+      if (match) {
+        return this.normalizeClassName(match[0]) === normTarget;
+      }
+    }
+
+    return false;
+  }
+
   async createPackage(data: any): Promise<SubscriptionPackage> {
     const pkg = new this.packageModel(data);
     return pkg.save();
@@ -50,9 +78,42 @@ export class SubscriptionsService {
   }
 
   async findPackageById(id: string): Promise<SubscriptionPackage> {
-    const pkg = await this.packageModel.findById(id).exec();
-    if (!pkg) throw new NotFoundException('Subscription package not found');
-    return pkg;
+    if (id && id.match(/^[0-9a-fA-F]{24}$/)) {
+      const pkg = await this.packageModel.findById(id).exec();
+      if (pkg) return pkg;
+    }
+    throw new NotFoundException('Subscription package not found');
+  }
+
+  async findOrCreatePackageForClass(packageId?: string, _classLevel?: string): Promise<SubscriptionPackageDocument> {
+    // 1. The subscription plan created by Admin is a general plan that works for all classes.
+    // If a valid packageId is provided, always use that exact package.
+    if (packageId && packageId.match(/^[0-9a-fA-F]{24}$/)) {
+      const byId = await this.packageModel.findById(packageId).exec();
+      if (byId) {
+        return byId;
+      }
+    }
+
+    // 2. Otherwise use the general subscription plan created by Admin
+    const allPackages = await this.packageModel.find().sort({ createdAt: -1 }).exec();
+    if (allPackages.length > 0) {
+      return allPackages[0];
+    }
+
+    // 3. Fallback general subscription plan only if Admin has not created any plan in DB yet
+    const fallback = new this.packageModel({
+      name: 'Annual Learning Subscription Plan',
+      academicSession: '2026/2027',
+      price: 25000,
+      features: [
+        'Full access to all curriculum subjects for your selected class (1 Year)',
+        'Interactive lessons, audio narration, and practice quizzes',
+        'Progress tracking throughout the academic year',
+        'New learning content as it is released',
+      ],
+    });
+    return fallback.save();
   }
 
   async activateSubscription(
@@ -63,17 +124,22 @@ export class SubscriptionsService {
     paymentGateway: string = 'paystack',
     classLevel?: string,
   ): Promise<UserSubscription> {
-    const pkg = await this.findPackageById(packageId);
-
-    const existingRef = await this.userSubscriptionModel.findOne({ reference }).exec();
+    const existingRef = await this.userSubscriptionModel
+      .findOne({ reference })
+      .populate('package')
+      .exec();
     if (existingRef) {
-      throw new ConflictException('Transaction reference already used');
+      return existingRef;
     }
 
     const user = await this.userModel.findById(userId).exec();
+    const pkg = await this.findOrCreatePackageForClass(packageId, classLevel || user?.class);
 
-    // Determine target class: explicit classLevel, or user's enrolled class, or extract from package name
-    let targetClass = classLevel || user?.class || '';
+    // Determine target class: explicit classLevel selected by student, or user's current class
+    let targetClass = (classLevel || '').trim();
+    if (!targetClass && user?.class) {
+      targetClass = user.class.trim();
+    }
     if (!targetClass && pkg?.name) {
       const match = pkg.name.match(/(Primary\s+[1-6]|JSS\s+[1-3]|SSS\s+[1-3]|SS\s+[1-3])/i);
       if (match) targetClass = match[0];
@@ -87,11 +153,11 @@ export class SubscriptionsService {
 
     const subscription = new this.userSubscriptionModel({
       user: userId,
-      package: packageId,
+      package: pkg._id,
       classLevel: targetClass,
       reference,
       paymentGateway,
-      amountPaid,
+      amountPaid: amountPaid || pkg.price || 25000,
       startDate,
       expiresAt,
       graceExpiresAt,
@@ -103,7 +169,7 @@ export class SubscriptionsService {
 
     const saved = await subscription.save();
 
-    // Ensure student's enrolled class is strictly bound to this subscription's class
+    // Update student's current active class to the newly subscribed class
     if (user && targetClass && user.class !== targetClass) {
       user.class = targetClass;
       if (typeof user.save === 'function') {
@@ -117,7 +183,7 @@ export class SubscriptionsService {
         await this.mailService.sendSubscriptionReceiptEmail(user, {
           packageName: pkg.name,
           academicSession: pkg.academicSession,
-          amount: amountPaid,
+          amount: amountPaid || pkg.price || 25000,
           reference,
           expiresAt,
         });
@@ -126,69 +192,93 @@ export class SubscriptionsService {
       this.logger.error('Failed to send subscription receipt email:', err);
     }
 
-    return saved;
+    return (await this.userSubscriptionModel.findById(saved._id).populate('package').exec()) || saved;
   }
 
-  async getUserActiveSubscription(userId: string): Promise<UserSubscription | null> {
-    const sub: any = await this.userSubscriptionModel
-      .findOne({ user: userId as any })
+  async getUserActiveSubscriptions(userId: string): Promise<UserSubscription[]> {
+    const subs: any[] = await this.userSubscriptionModel
+      .find({ user: userId as any })
       .sort({ createdAt: -1 })
       .populate('package')
       .exec();
 
-    if (!sub) return null;
+    if (!subs || subs.length === 0) return [];
 
     const now = new Date();
+    const activeSubs: UserSubscription[] = [];
 
-    // Past 7-day grace period -> Expired
-    if (now > sub.graceExpiresAt) {
-      if (sub.status !== 'expired') {
-        sub.status = 'expired';
-        sub.isActive = false;
-        await sub.save();
-
-        const user = await this.userModel.findById(userId).exec();
-        if (user && user.email) {
-          await this.mailService.sendSubscriptionExpiredEmail(user, {
-            packageName: (sub.package as any)?.name || 'Annual Package',
-          });
-        }
-      }
-      return null;
-    }
-
-    // Past 1-year expiration date, but within 7 days -> Grace period
-    if (now > sub.expiresAt) {
-      if (sub.status !== 'grace') {
-        sub.status = 'grace';
-        sub.isActive = true;
-        await sub.save();
-
-        if (!sub.graceNoticeSent) {
-          sub.graceNoticeSent = true;
+    for (const sub of subs) {
+      // Past 7-day grace period -> Expired
+      if (now > sub.graceExpiresAt) {
+        if (sub.status !== 'expired') {
+          sub.status = 'expired';
+          sub.isActive = false;
           await sub.save();
+
           const user = await this.userModel.findById(userId).exec();
           if (user && user.email) {
-            const daysLeft = Math.ceil(
-              (sub.graceExpiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
-            );
-            await this.mailService.sendSubscriptionGraceNoticeEmail(user, {
+            await this.mailService.sendSubscriptionExpiredEmail(user, {
               packageName: (sub.package as any)?.name || 'Annual Package',
-              graceExpiryDate: sub.graceExpiresAt,
-              graceDaysLeft: Math.max(1, daysLeft),
             });
           }
         }
+        continue;
       }
-      return sub as UserSubscription;
+
+      // Past 1-year expiration date, but within 7 days -> Grace period
+      if (now > sub.expiresAt) {
+        if (sub.status !== 'grace') {
+          sub.status = 'grace';
+          sub.isActive = true;
+          await sub.save();
+
+          if (!sub.graceNoticeSent) {
+            sub.graceNoticeSent = true;
+            await sub.save();
+            const user = await this.userModel.findById(userId).exec();
+            if (user && user.email) {
+              const daysLeft = Math.ceil(
+                (sub.graceExpiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
+              );
+              await this.mailService.sendSubscriptionGraceNoticeEmail(user, {
+                packageName: (sub.package as any)?.name || 'Annual Package',
+                graceExpiryDate: sub.graceExpiresAt,
+                graceDaysLeft: Math.max(1, daysLeft),
+              });
+            }
+          }
+        }
+        activeSubs.push(sub as UserSubscription);
+        continue;
+      }
+
+      if (sub.status === 'active' || sub.status === 'grace') {
+        activeSubs.push(sub as UserSubscription);
+      }
     }
 
-    // Active
-    if (sub.status === 'active') {
-      return sub as UserSubscription;
+    return activeSubs;
+  }
+
+  async getUserActiveSubscription(userId: string, classLevel?: string): Promise<UserSubscription | null> {
+    const activeSubs = await this.getUserActiveSubscriptions(userId);
+    if (activeSubs.length === 0) return null;
+
+    const user = await this.userModel.findById(userId).exec();
+    const targetClass = (classLevel || user?.class || '').trim();
+
+    if (targetClass) {
+      const matchedForClass = activeSubs.find((sub) =>
+        this.doesSubscriptionMatchClass(sub, targetClass),
+      );
+      if (matchedForClass) {
+        return matchedForClass;
+      }
+      // If a specific class exists on the user or query, subscription must match that class
+      return null;
     }
 
-    return null;
+    return activeSubs[0] || null;
   }
 
   async getUserSubscriptionHistory(userId: string): Promise<UserSubscription[]> {
@@ -209,6 +299,7 @@ export class SubscriptionsService {
     userId: string,
     topicId?: string,
     lessonId?: string,
+    classLevel?: string,
   ): Promise<{
     canAccess: boolean;
     hasSubscription: boolean;
@@ -217,18 +308,6 @@ export class SubscriptionsService {
     reason?: string;
     message?: string;
   }> {
-    const activeSub = await this.getUserActiveSubscription(userId);
-    if (activeSub) {
-      return {
-        canAccess: true,
-        hasSubscription: true,
-        isGracePeriod: activeSub.status === 'grace',
-        isFreeTrial: false,
-        message: activeSub.status === 'grace' ? '7-Day Grace Period Active' : 'Active Subscription',
-      };
-    }
-
-    // Check user free trial status
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
       return {
@@ -237,6 +316,35 @@ export class SubscriptionsService {
         isGracePeriod: false,
         isFreeTrial: false,
         reason: 'user_not_found',
+      };
+    }
+
+    let topic: any = null;
+    let subject: any = null;
+    let targetClass = (classLevel || '').trim();
+
+    if (topicId) {
+      topic = await this.topicModel.findById(topicId).populate('lessons').exec();
+      if (topic?.subject) {
+        subject = await this.subjectModel.findById(topic.subject).populate('topics').exec();
+        if (!targetClass && subject) {
+          targetClass = subject.classLevel || (Array.isArray(subject.classes) ? subject.classes[0] : '') || '';
+        }
+      }
+    }
+
+    if (!targetClass) {
+      targetClass = user.class || '';
+    }
+
+    const activeSub = await this.getUserActiveSubscription(userId, targetClass);
+    if (activeSub) {
+      return {
+        canAccess: true,
+        hasSubscription: true,
+        isGracePeriod: activeSub.status === 'grace',
+        isFreeTrial: false,
+        message: activeSub.status === 'grace' ? '7-Day Grace Period Active' : 'Active Subscription',
       };
     }
 
@@ -251,8 +359,6 @@ export class SubscriptionsService {
       };
     }
 
-    // Find the requested topic and its parent subject
-    const topic = await this.topicModel.findById(topicId).populate('lessons').exec();
     if (!topic) {
       return {
         canAccess: false,
@@ -265,12 +371,9 @@ export class SubscriptionsService {
 
     // Determine if this is the first topic of this subject
     let isFirstTopicOfSubject = true;
-    if (topic.subject) {
-      const subject = await this.subjectModel.findById(topic.subject).populate('topics').exec();
-      if (subject && Array.isArray(subject.topics) && subject.topics.length > 0) {
-        const firstTopicId = ((subject.topics[0] as any)?._id || subject.topics[0]).toString();
-        isFirstTopicOfSubject = firstTopicId === topicId.toString();
-      }
+    if (subject && Array.isArray(subject.topics) && subject.topics.length > 0) {
+      const firstTopicId = ((subject.topics[0] as any)?._id || subject.topics[0]).toString();
+      isFirstTopicOfSubject = firstTopicId === topicId.toString();
     }
 
     // If it is NOT the first topic of this subject, subscription is required

@@ -22,6 +22,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { ClassesModule } from './classes/classes.module';
 import { TtsModule } from './tts/tts.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AiGeneratorModule } from './ai-generator/ai-generator.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     ClassesModule,
     TtsModule,
     DashboardModule,
+    AiGeneratorModule,
   ],
   controllers: [AppController],
   providers: [AppService],

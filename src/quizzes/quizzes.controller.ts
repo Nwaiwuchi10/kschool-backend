@@ -24,8 +24,9 @@ export class QuizzesController {
 
   @Get('topic/:topicId')
   @ApiOperation({ summary: 'Get all quizzes under a topic' })
-  findQuizzesByTopic(@Param('topicId') topicId: string) {
-    return this.quizzesService.findQuizzesByTopic(topicId);
+  findQuizzesByTopic(@Param('topicId') topicId: string, @Request() req: any) {
+    const subjectName = req.query?.subjectName || req.query?.subject;
+    return this.quizzesService.findQuizzesByTopic(topicId, subjectName);
   }
 
   @Get('lesson/:lessonId')

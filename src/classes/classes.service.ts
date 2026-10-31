@@ -36,8 +36,36 @@ export class ClassesService {
     return schoolClass;
   }
 
+  private normalizeClassName(cls?: string): string {
+    if (!cls) return '';
+    return cls
+      .trim()
+      .toUpperCase()
+      .replace(/^SSS\s+/i, 'SS ')
+      .replace(/\s+/g, ' ');
+  }
+
   async findByName(name: string): Promise<SchoolClass | null> {
-    return this.classModel.findOne({ name: { $regex: new RegExp(`^${name.trim()}$`, 'i') } }).exec();
+    const trimmed = name.trim();
+    const direct = await this.classModel
+      .findOne({ name: { $regex: new RegExp(`^${trimmed}$`, 'i') } })
+      .exec();
+    if (direct) return direct;
+
+    // Also match SS 1 <-> SSS 1 variants
+    const altName = trimmed.match(/^SSS\s+/i)
+      ? trimmed.replace(/^SSS\s+/i, 'SS ')
+      : trimmed.match(/^SS\s+/i)
+      ? trimmed.replace(/^SS\s+/i, 'SSS ')
+      : null;
+
+    if (altName) {
+      return this.classModel
+        .findOne({ name: { $regex: new RegExp(`^${altName}$`, 'i') } })
+        .exec();
+    }
+
+    return null;
   }
 
   async create(dto: CreateClassDto): Promise<SchoolClass> {
@@ -71,66 +99,76 @@ export class ClassesService {
     }
 
     const now = new Date();
-    const activeSub = await this.userSubscriptionModel
-      .findOne({
+    const activeSubs = await this.userSubscriptionModel
+      .find({
         user: userId,
         isActive: true,
         graceExpiresAt: { $gt: now },
         status: { $in: ['active', 'grace'] },
       } as any)
+      .sort({ createdAt: -1 })
       .populate('package')
       .exec();
 
-    let paidClass: string | null = null;
-    let isClassLocked = false;
-
-    if (activeSub) {
-      isClassLocked = true;
-      if ((activeSub as any).classLevel) {
-        paidClass = (activeSub as any).classLevel;
-      } else if (user.class) {
-        paidClass = user.class;
+    const paidClassesSet = new Set<string>();
+    for (const sub of activeSubs) {
+      let cLevel = (sub as any).classLevel || '';
+      if (!cLevel && typeof sub.package === 'object' && (sub.package as any)?.name) {
+        const match = (sub.package as any).name.match(/(Primary\s+[1-6]|JSS\s+[1-3]|SSS\s+[1-3]|SS\s+[1-3])/i);
+        if (match) cLevel = match[0];
+      }
+      if (cLevel) {
+        paidClassesSet.add(cLevel.trim());
       }
     }
 
+    const paidClasses = Array.from(paidClassesSet);
+    const currentSelected = user.class || null;
+    const normSelected = this.normalizeClassName(currentSelected || '');
+
+    // Check if the currently selected class has an active subscription
+    const matchingSub = activeSubs.find((sub: any) => {
+      let cLevel = sub.classLevel || '';
+      if (!cLevel && typeof sub.package === 'object' && sub.package?.name) {
+        const match = sub.package.name.match(/(Primary\s+[1-6]|JSS\s+[1-3]|SSS\s+[1-3]|SS\s+[1-3])/i);
+        if (match) cLevel = match[0];
+      }
+      return cLevel && this.normalizeClassName(cLevel) === normSelected;
+    });
+
+    const paidClass = matchingSub
+      ? ((matchingSub as any).classLevel || currentSelected)
+      : (paidClasses[0] || null);
+
     return {
-      selectedClass: user.class || null,
+      selectedClass: currentSelected,
       paidClass,
-      isClassLocked,
-      activeSubscription: activeSub || null,
+      paidClasses,
+      isCurrentClassSubscribed: !!matchingSub,
+      // Students can select and make payment for another class; each subscription is attached to its class
+      isClassLocked: false,
+      activeSubscription: matchingSub || null,
     };
   }
 
   async selectClass(userId: string, className: string) {
     const trimmedClass = className.trim();
     const validClass = await this.findByName(trimmedClass);
-    if (!validClass) {
-      throw new NotFoundException(`Class "${trimmedClass}" is not an active curriculum class.`);
-    }
-
-    const status = await this.getUserClassStatus(userId);
-    if (status.isClassLocked && status.paidClass) {
-      const isSameClass = status.paidClass.toLowerCase() === trimmedClass.toLowerCase();
-      if (!isSameClass) {
-        throw new ConflictException(
-          `Your subscription is locked to ${status.paidClass}. You can only switch classes after your subscription expires.`
-        );
-      }
-    }
+    const resolvedClassName = validClass ? validClass.name : trimmedClass;
 
     const updatedUser = await this.userModel
-      .findByIdAndUpdate(userId, { class: validClass.name }, { new: true })
+      .findByIdAndUpdate(userId, { class: resolvedClassName }, { new: true })
       .exec();
 
     if (!updatedUser) {
       throw new NotFoundException('User not found');
     }
 
-    this.mailService?.sendClassEnrollmentEmail?.(updatedUser, validClass.name)?.catch?.(e => this.logger.error('Enrollment email error', e));
+    this.mailService?.sendClassEnrollmentEmail?.(updatedUser, resolvedClassName)?.catch?.(e => this.logger.error('Enrollment email error', e));
 
     return {
-      message: `Class successfully set to ${validClass.name}`,
-      selectedClass: validClass.name,
+      message: `Class successfully set to ${resolvedClassName}`,
+      selectedClass: resolvedClassName,
       user: {
         id: updatedUser._id,
         firstName: updatedUser.firstName,

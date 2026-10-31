@@ -68,9 +68,17 @@ export class SubscriptionsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Get('my-active')
-  @ApiOperation({ summary: 'Get current user active subscription' })
-  getMyActiveSubscription(@Request() req: any) {
-    return this.subscriptionsService.getUserActiveSubscription(req.user.id);
+  @ApiOperation({ summary: 'Get current user active subscription (optionally for a specific classLevel)' })
+  getMyActiveSubscription(@Request() req: any, @Query('classLevel') classLevel?: string) {
+    return this.subscriptionsService.getUserActiveSubscription(req.user.id || req.user._id, classLevel);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get('my-active-all')
+  @ApiOperation({ summary: 'Get all active subscriptions across classes for current user' })
+  getMyActiveSubscriptions(@Request() req: any) {
+    return this.subscriptionsService.getUserActiveSubscriptions(req.user.id || req.user._id);
   }
 
   @ApiBearerAuth()
@@ -78,7 +86,7 @@ export class SubscriptionsController {
   @Get('my-history')
   @ApiOperation({ summary: 'Get current user subscription and payment history' })
   getMyHistory(@Request() req: any) {
-    return this.subscriptionsService.getUserSubscriptionHistory(req.user.id);
+    return this.subscriptionsService.getUserSubscriptionHistory(req.user.id || req.user._id);
   }
 
   @ApiBearerAuth()
@@ -89,8 +97,14 @@ export class SubscriptionsController {
     @Request() req: any,
     @Query('topicId') topicId?: string,
     @Query('lessonId') lessonId?: string,
+    @Query('classLevel') classLevel?: string,
   ) {
-    return this.subscriptionsService.checkLessonAccess(req.user.id, topicId, lessonId);
+    return this.subscriptionsService.checkLessonAccess(
+      req.user.id || req.user._id,
+      topicId,
+      lessonId,
+      classLevel,
+    );
   }
 
   @ApiBearerAuth()

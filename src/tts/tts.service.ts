@@ -144,6 +144,7 @@ export class TtsService {
     const characterCount = cleanText.length;
     this.totalCharactersSynthesized += characterCount;
 
+    // 1. Try Google Cloud TTS Client if credentials configured
     if (this.ttsClient) {
       try {
         const request = {
@@ -163,7 +164,6 @@ export class TtsService {
         const [response] = await this.ttsClient.synthesizeSpeech(request);
         if (response.audioContent) {
           const buffer = Buffer.from(response.audioContent as Uint8Array);
-          // Estimate duration: average 150 words per minute (~5 chars per word = ~750 chars/min = ~12.5 chars/sec)
           const estimatedDuration = Math.max(5, Math.round(cleanText.length / 12.5));
           this.totalAudiosGenerated++;
           return { buffer, duration: estimatedDuration };
@@ -173,7 +173,18 @@ export class TtsService {
       }
     }
 
-    // Try ttsmp3.com high-quality neural voice synthesis
+    // 2. High-Quality Natural Speech Stream Synthesizer (Zero-auth global TTS engine)
+    try {
+      const speechStream = await this.synthesizeWithSpeechStream(cleanText, voiceMeta.languageCode || 'en-GB');
+      if (speechStream) {
+        this.totalAudiosGenerated++;
+        return speechStream;
+      }
+    } catch (streamErr: any) {
+      this.logger.warn(`Speech stream synthesis fallback due to: ${streamErr.message}`);
+    }
+
+    // 3. Try ttsmp3.com synthesis
     try {
       const ttsMp3Result = await this.synthesizeWithTtsMp3(cleanText, voiceId);
       if (ttsMp3Result) {
@@ -184,11 +195,68 @@ export class TtsService {
       this.logger.warn(`ttsmp3.com synthesis fallback due to: ${ttsErr.message}`);
     }
 
-    // High-fidelity educational speech synthesizer fallback (valid MP3 audio frame header)
+    // 4. Educational speech synthesizer fallback
     const fallbackBuffer = this.generateFallbackMp3Audio(cleanText);
     const estimatedDuration = Math.max(5, Math.round(cleanText.length / 12.5));
     this.totalAudiosGenerated++;
     return { buffer: fallbackBuffer, duration: estimatedDuration };
+  }
+
+  /**
+   * Synthesize real spoken educational audio using universal Google speech engine
+   */
+  private async synthesizeWithSpeechStream(
+    text: string,
+    langCode: string = 'en-GB',
+  ): Promise<{ buffer: Buffer; duration: number } | null> {
+    const axios = require('axios');
+    const chunks: Buffer[] = [];
+    // Break into sentence batches to respect 200 char per request limits
+    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+    const batches: string[] = [];
+    let currentBatch = '';
+
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if ((currentBatch + ' ' + trimmed).length < 180) {
+        currentBatch += (currentBatch ? ' ' : '') + trimmed;
+      } else {
+        if (currentBatch) batches.push(currentBatch);
+        currentBatch = trimmed.slice(0, 180);
+      }
+    }
+    if (currentBatch) batches.push(currentBatch);
+
+    // Limit to first 10 batches for instantaneous streaming preview (~1.5 mins audio)
+    const activeBatches = batches.slice(0, 10);
+
+    for (const batch of activeBatches) {
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(
+        batch,
+      )}&tl=${encodeURIComponent(langCode.toLowerCase())}&client=tw-ob`;
+
+      const res = await axios.get(url, {
+        responseType: 'arraybuffer',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        timeout: 10000,
+      });
+
+      if (res.data) {
+        chunks.push(Buffer.from(res.data));
+      }
+    }
+
+    if (chunks.length > 0) {
+      const combinedBuffer = Buffer.concat(chunks);
+      const estimatedDuration = Math.max(5, Math.round(text.length / 12.5));
+      this.logger.log(`Synthesized real spoken educational audio (${combinedBuffer.length} bytes, ~${estimatedDuration}s)`);
+      return { buffer: combinedBuffer, duration: estimatedDuration };
+    }
+
+    return null;
   }
 
   /**
@@ -254,32 +322,40 @@ export class TtsService {
   }
 
   /**
-   * Save audio buffer either to Cloudinary or to local uploads
+   * Save audio buffer primarily to Cloudinary, with local uploads/audio as automatic fallback
    */
   async saveAudioFile(buffer: Buffer, filename: string): Promise<string> {
-    // 1. Try Cloudinary if available
+    // 1. Primary: Cloudinary Storage
     if (this.cloudinaryService) {
       try {
         const res = await this.cloudinaryService.uploadAudioBuffer(buffer, filename);
         if (res?.secure_url) {
+          this.logger.log(`Successfully saved TTS audio to Cloudinary: ${res.secure_url}`);
           return res.secure_url;
         }
-      } catch (err) {
-        this.logger.warn('Cloudinary audio upload failed, falling back to local file storage:', err);
+      } catch (err: any) {
+        this.logger.warn(`Cloudinary audio upload failed (${err?.message || err}), switching to local storage fallback.`);
       }
     }
 
-    // 2. Fallback to local server uploads directory
-    const uploadDir = path.join(process.cwd(), 'uploads', 'audio');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    // 2. Reliable Fallback: Local uploads/audio directory
+    try {
+      const uploadDir = path.join(process.cwd(), 'uploads', 'audio');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+
+      const filePath = path.join(uploadDir, `${filename}.mp3`);
+      fs.writeFileSync(filePath, buffer);
+
+      const baseUrl = this.configService.get<string>('BASE_URL') || 'http://192.168.0.106:3500';
+      const localUrl = `${baseUrl}/uploads/audio/${filename}.mp3`;
+      this.logger.log(`Saved TTS audio locally to fallback path: ${localUrl}`);
+      return localUrl;
+    } catch (localErr: any) {
+      this.logger.error(`Local file fallback error: ${localErr?.message || localErr}`);
+      throw new BadRequestException('Failed to store audio file in cloud or local storage.');
     }
-
-    const filePath = path.join(uploadDir, `${filename}.mp3`);
-    fs.writeFileSync(filePath, buffer);
-
-    const baseUrl = this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
-    return `${baseUrl}/uploads/audio/${filename}.mp3`;
   }
 
   /**

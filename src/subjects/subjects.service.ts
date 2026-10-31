@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Subject, SubjectDocument } from './schemas/subject.schema';
 import { Topic, TopicDocument } from './schemas/topic.schema';
 import { Lesson, LessonDocument } from './schemas/lesson.schema';
@@ -73,18 +73,26 @@ export class SubjectsService {
     }
     return this.subjectModel.find(filter).populate({
       path: 'topics',
-      populate: {
-        path: 'lessons',
-      },
+      populate: [
+        {
+          path: 'lessons',
+          populate: [{ path: 'exercises' }, { path: 'quiz' }],
+        },
+        { path: 'quizzes' },
+      ],
     }).exec();
   }
 
   async findSubjectById(id: string): Promise<any> {
     const subject = await this.subjectModel.findById(id).populate({
       path: 'topics',
-      populate: {
-        path: 'lessons',
-      },
+      populate: [
+        {
+          path: 'lessons',
+          populate: [{ path: 'exercises' }, { path: 'quiz' }],
+        },
+        { path: 'quizzes' },
+      ],
     }).exec();
     if (!subject) throw new NotFoundException('Subject not found');
 
@@ -152,15 +160,52 @@ export class SubjectsService {
   }
 
   async findTopicById(id: string): Promise<Topic> {
-    const topic = await this.topicModel.findById(id).populate('lessons').exec();
+    const topic = await this.topicModel
+      .findById(id)
+      .populate({
+        path: 'lessons',
+        populate: [{ path: 'exercises' }, { path: 'quiz' }],
+      })
+      .populate('quizzes')
+      .exec();
     if (!topic) throw new NotFoundException('Topic not found');
     return topic;
   }
 
   async findLessonsByTopic(topicId: string): Promise<Lesson[]> {
-    const topic = await this.topicModel.findById(topicId).populate('lessons').exec();
+    const topic = await this.topicModel
+      .findById(topicId)
+      .populate({
+        path: 'lessons',
+        populate: [{ path: 'exercises' }, { path: 'quiz' }],
+      })
+      .exec();
     if (!topic) throw new NotFoundException('Topic not found');
-    return (topic.lessons as any) || [];
+
+    let lessonsList: any[] = (topic.lessons as any) || [];
+
+    // Also query lessons collection directly where topic matches topicId (handles direct topic links)
+    const topicObjectId = Types.ObjectId.isValid(topicId) ? new Types.ObjectId(topicId) : null;
+    const directQuery = topicObjectId
+      ? { $or: [{ topic: topicId as any }, { topic: topicObjectId as any }] }
+      : { topic: topicId as any };
+
+    const directLessons = await this.lessonModel
+      .find(directQuery)
+      .populate('exercises')
+      .populate('quiz')
+      .exec();
+
+    // Merge any lessons found directly into the list if not already present
+    const existingIds = new Set(lessonsList.map((l: any) => l._id?.toString()));
+    for (const dl of directLessons) {
+      if (dl && dl._id && !existingIds.has(dl._id.toString())) {
+        lessonsList.push(dl);
+        existingIds.add(dl._id.toString());
+      }
+    }
+
+    return lessonsList;
   }
 
   async createLesson(topicId: string, data: any): Promise<Lesson> {

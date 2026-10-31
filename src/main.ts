@@ -23,6 +23,10 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
+  // Serve static files for local audio uploads fallback
+  const path = require('path');
+  server.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
   app.enableCors();
   await app.init();
   isReady = true;

@@ -29,8 +29,10 @@ export class PaymentsService {
    * Initialize a Paystack payment transaction
    * Calls Paystack's transaction initialize API and returns authorization_url
    */
-  async initializePayment(user: any, packageId: string, callbackUrl?: string) {
-    const pkg = await this.subscriptionsService.findPackageById(packageId);
+  async initializePayment(user: any, packageId: string, callbackUrl?: string, classLevel?: string) {
+    const targetClass = (classLevel || user?.class || 'JSS 1').trim();
+    const pkg: any = await this.subscriptionsService.findOrCreatePackageForClass(packageId, targetClass);
+    const resolvedPackageId = String(pkg._id || packageId);
     const paymentReference = `PAYSTACK-KSM-${Date.now()}`;
     const amountInKobo = Math.round((pkg.price || 25000) * 100);
     const customerEmail = user.email || 'student@kschoolmate.com';
@@ -52,10 +54,11 @@ export class PaymentsService {
           reference: paymentReference,
           callback_url: callbackUrl || 'https://kschoolmate.com/payment-callback',
           metadata: {
-            packageId: packageId,
+            packageId: resolvedPackageId,
             packageName: pkg.name,
             academicSession: pkg.academicSession,
-            userId: user._id || user.id,
+            classLevel: targetClass,
+            userId: String(user._id || user.id),
             customerName,
           },
         }),
@@ -88,16 +91,18 @@ export class PaymentsService {
       amount: pkg.price || 25000,
       packageName: pkg.name,
       academicSession: pkg.academicSession,
-      packageId,
+      packageId: resolvedPackageId,
+      classLevel: targetClass,
     };
   }
 
   /**
    * Verify a Paystack payment transaction and activate 1-year subscription
    */
-  async verifyPayment(reference: string, userId: string, packageId?: string) {
+  async verifyPayment(reference: string, userId: string, packageId?: string, classLevel?: string) {
     let verifiedAmount = 25000;
     let targetPackageId = packageId;
+    let targetClassLevel = classLevel;
     let isSuccessful = false;
 
     try {
@@ -121,6 +126,9 @@ export class PaymentsService {
           if (data.metadata?.packageId) {
             targetPackageId = data.metadata.packageId;
           }
+          if (data.metadata?.classLevel && !targetClassLevel) {
+            targetClassLevel = data.metadata.classLevel;
+          }
           this.logger.log(`Paystack payment verified successfully for ref: ${reference}, amount: ₦${verifiedAmount}`);
         } else {
           this.logger.warn(`Paystack transaction status: ${data.status} for ref: ${reference}`);
@@ -130,23 +138,20 @@ export class PaymentsService {
       this.logger.warn(`Paystack direct verification call notice: ${e.message}`);
     }
 
-    // Default package if not passed
-    if (!targetPackageId) {
-      const packages = await this.subscriptionsService.findAllPackages();
-      if (packages.length > 0) {
-        targetPackageId = (packages[0] as any)._id.toString();
-      } else {
-        throw new BadRequestException('No subscription packages available');
-      }
-    }
+    const pkg: any = await this.subscriptionsService.findOrCreatePackageForClass(
+      targetPackageId,
+      targetClassLevel,
+    );
+    targetPackageId = String(pkg._id);
 
-    // Activate subscription for 1 year with 7-day grace mode and email receipt
+    // Activate subscription for 1 year with 7-day grace mode and email receipt, attached to classLevel
     const subscription = await this.subscriptionsService.activateSubscription(
       userId,
       targetPackageId!,
       reference,
       verifiedAmount,
       'paystack',
+      targetClassLevel,
     );
 
     return {
@@ -185,6 +190,7 @@ export class PaymentsService {
       const amountInNaira = Math.round((data.amount || 0) / 100);
       const userId = data.metadata?.userId;
       const packageId = data.metadata?.packageId;
+      const classLevel = data.metadata?.classLevel;
 
       this.logger.log(`Paystack webhook charge.success for ref: ${reference}`);
       if (userId && packageId) {
@@ -194,6 +200,7 @@ export class PaymentsService {
           reference,
           amountInNaira,
           'paystack',
+          classLevel,
         );
       }
     }
