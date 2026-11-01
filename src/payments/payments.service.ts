@@ -15,11 +15,13 @@ export class PaymentsService {
     private subscriptionsService: SubscriptionsService,
   ) {
     this.secretKey =
-      this.configService.get<string>('PAYSTACK_SECRET_KEY') ||
-      'sk_test_781d647a540bbbb4d7d75d11a9e68867883a736a';
+      (this.configService.get<string>('PAYSTACK_SECRET_KEY') ||
+      process.env.PAYSTACK_SECRET_KEY ||
+      'sk_test_5396c73d28ad8f1e1775fb03a9c850b1de6d0833').trim();
     this.publicKey =
-      this.configService.get<string>('PAYSTACK_PUBLIC_KEY') ||
-      'pk_test_3f1983454d1e8c5cecd2cc5b9e5e09b94ed1bfbf';
+      (this.configService.get<string>('PAYSTACK_PUBLIC_KEY') ||
+      process.env.PAYSTACK_PUBLIC_KEY ||
+      'pk_test_9d91319d39c7c9e93f0d8a6faf48ff1a86ef61d0').trim();
     this.baseUrl =
       this.configService.get<string>('PAYSTACK_BASE_URL') ||
       'https://api.paystack.co';
