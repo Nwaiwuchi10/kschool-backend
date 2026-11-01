@@ -70,15 +70,19 @@ export class PaymentsService {
         accessCode = resData.data.access_code;
         this.logger.log(`Paystack transaction initialized: ${paymentReference} -> ${authorizationUrl}`);
       } else {
-        this.logger.warn(`Paystack API returned status false: ${resData.message}`);
+        this.logger.error(`Paystack API returned failure: ${JSON.stringify(resData)}`);
+        throw new BadRequestException(
+          resData?.message || 'Failed to initialize transaction with Paystack.'
+        );
       }
     } catch (e: any) {
       this.logger.error(`Error initializing Paystack transaction: ${e.message}`);
-    }
-
-    // High fidelity fallback simulator if network is unavailable
-    if (!authorizationUrl) {
-      authorizationUrl = `https://checkout.paystack.com/${paymentReference}?amount=${amountInKobo}&ref=${paymentReference}`;
+      if (e instanceof BadRequestException) {
+        throw e;
+      }
+      throw new BadRequestException(
+        e?.message || 'Unable to connect to Paystack payment gateway. Please check server credentials or network.'
+      );
     }
 
     return {
